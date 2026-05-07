@@ -1,19 +1,32 @@
-[tool.poetry]
-name = "sprint-template"
+[project]
+name = "inframind-proteus"
+description = "Dynamic and statistical model for the 3rd Infodengue-Mosqlimate Dengue Challenge (IMDC)."
+authors = [
+  {name = "Paulo C. Ventura", email = "paulo.pc.vs@gmail.com"},
+    # TODO: Add others
+]
 version = "0.1.0"
-description = ""
-authors = ["Eduardo Correa Araujo <65051489+eduardocorrearaujo@users.noreply.github.com>"]
+requires-python = ">=3.10"
 readme = "README.md"
+dependencies = [
+  "mosqlient==1.5.2",
+  "epiweeks>=2.3.0",
+  "jupyter>=1.0.0",
+  "pmdarima>=2.0.4",
+  "python-dotenv>=1.0.1",
+]
+package = true
 
-[tool.poetry.dependencies]
-python = "<3.13,>=3.10"
-mosqlient = "1.5.2"
-epiweeks = "^2.3.0"
-jupyter = "^1.0.0"
-pmdarima = "^2.0.4"
-python-dotenv = "^1.0.1"
-
+[project.optional-dependencies]
+dev = [
+  "plotly>=6.0.0",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+
