@@ -55,6 +55,8 @@ def main():
 
     # Extra processing
     full_df["year"] = full_df["year"].astype(int)
+    full_df["geocode"] = full_df["geocode"].astype(int)
+    full_df["ep_dur"] = full_df["ep_dur"].astype(int)
 
     # Rearange and save
     other_cols = [col for col in full_df.columns if col not in ["uf", "year"]]
