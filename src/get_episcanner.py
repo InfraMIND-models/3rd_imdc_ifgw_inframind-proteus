@@ -53,6 +53,9 @@ def main():
     # Concatenate all dataframes into one.
     full_df = pd.concat(df_list, ignore_index=True)
 
+    # Extra processing
+    full_df["year"] = full_df["year"].astype(int)
+
     # Rearange and save
     other_cols = [col for col in full_df.columns if col not in ["uf", "year"]]
     full_df = full_df[["uf", "year", *other_cols]]
