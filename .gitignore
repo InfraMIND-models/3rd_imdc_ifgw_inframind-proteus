@@ -209,4 +209,7 @@ __marimo__/
 
 ### PROJECT CUSTOM IGNORES ###
 .local
-#data/data_imdc_2026
+#data/data_imdc_2026  # Now managed through DVC
+
+outputs/*
+!outputs/*.dvc

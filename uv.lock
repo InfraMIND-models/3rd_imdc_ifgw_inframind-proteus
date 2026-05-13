@@ -1513,18 +1513,16 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "nbdime" },
-    { name = "plotly" },
-]
-paulo-dev = [
     { name = "dvc" },
     { name = "dvc-ssh" },
+    { name = "nbdime" },
+    { name = "plotly" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "dvc", marker = "extra == 'paulo-dev'", specifier = ">=3.59" },
-    { name = "dvc-ssh", marker = "extra == 'paulo-dev'" },
+    { name = "dvc", marker = "extra == 'dev'", specifier = ">=3.59" },
+    { name = "dvc-ssh", marker = "extra == 'dev'" },
     { name = "epiweeks", specifier = ">=2.3.0" },
     { name = "jupyter", specifier = ">=1.0.0" },
     { name = "mosqlient", specifier = ">=2.1.2" },
@@ -1533,7 +1531,7 @@ requires-dist = [
     { name = "pmdarima", specifier = ">=2.0.4" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
 ]
-provides-extras = ["dev", "paulo-dev"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "ipykernel"
