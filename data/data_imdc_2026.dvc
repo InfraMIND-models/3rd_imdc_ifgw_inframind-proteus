@@ -1,0 +1,6 @@
+outs:
+- md5: eb0b47974b944b8cd81b7d4254aacae0.dir
+  size: 804286721
+  nfiles: 11
+  hash: md5
+  path: data_imdc_2026

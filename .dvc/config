@@ -1,0 +1,5 @@
+[core]
+    remote = la_berenjena
+['remote "la_berenjena"']
+    url = ssh://la-berenjena:/data/Inframind/IMDC2026/dvc_test
+    # ask_password = false
