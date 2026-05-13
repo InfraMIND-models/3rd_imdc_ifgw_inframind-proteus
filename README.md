@@ -3,6 +3,39 @@
 InfraMIND Proteus is the first model of the InfraMIND (Infrastructure for Modeling Infectious Diseases) family, specifically developed for the 3rd edition of the [Infodengue-Mosqlimate Dengue Challenge](https://sprint.mosqlimate.org/) (IMDC).
 
 
+# Quick start
+
+Requirements:
+- python
+- [Astral UV](https://docs.astral.sh/uv/)
+- git
+
+Create a fork and clone it locally:
+```bash
+git clone https://github.com/<your_username>/3rd_imdc_ifgw_inframind-proteus.git
+cd 3rd_imdc_ifgw_inframind-proteus
+```
+
+Setup the development environment with uv:
+```
+uv sync --extra dev
+```
+
+Activate the environment:
+```
+source .venv/bin/activate
+```
+
+Re-activate the environment every new command line session. Alternatively, you can run without activating the environment by calling `uv run [commands]`.
+For example, running
+```
+uv run jupyter notebook
+```
+
+will start a jupyter server already configured for the Proteus model.
+
+
+
 
 
 # Required information
