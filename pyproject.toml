@@ -27,6 +27,7 @@ dev = [
 
 paulo-dev = [
     "dvc>=3.59",
+    "dvc-ssh",
 ]
 
 [build-system]
