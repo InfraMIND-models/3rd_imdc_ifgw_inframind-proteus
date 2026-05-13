@@ -70,7 +70,7 @@ def _dvc_remote_user(username: str) -> list[str]:
         ]
     else:
         return (
-            "dvc config core.remote la_berenjena_local".split()
+            "uv run dvc config core.remote la_berenjena_local".split()
         )
 
 
