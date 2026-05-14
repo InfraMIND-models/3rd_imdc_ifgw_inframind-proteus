@@ -16,9 +16,10 @@ git clone https://github.com/<your_username>/3rd_imdc_ifgw_inframind-proteus.git
 cd 3rd_imdc_ifgw_inframind-proteus
 ```
 
-Setup the development environment with uv:
+Setup the development environment (assumes you have uv).
+Follow the instructions as prompted.
 ```
-uv sync --extra dev
+python3 setup_env.py
 ```
 
 Activate the environment:
@@ -33,6 +34,11 @@ uv run jupyter notebook
 ```
 
 will start a jupyter server already configured for the Proteus model.
+
+To get all large data files managed via DVC, run:
+```
+dvc pull
+```
 
 
 
