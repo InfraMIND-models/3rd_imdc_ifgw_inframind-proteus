@@ -35,6 +35,11 @@ uv run jupyter notebook
 
 will start a jupyter server already configured for the Proteus model.
 
+To get all large data files managed via DVC, run:
+```
+dvc pull
+```
+
 
 
 
