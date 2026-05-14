@@ -48,6 +48,11 @@ Once configured, you can get all large data files managed via DVC with:
 dvc pull
 ```
 
+To get all large data files managed via DVC, run:
+```
+dvc pull
+```
+
 
 
 
