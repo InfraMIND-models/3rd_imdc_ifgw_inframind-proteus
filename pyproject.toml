@@ -6,16 +6,17 @@ authors = [
     # TODO: Add others
 ]
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 readme = "README.md"
 dependencies = [
-#    "mosqlient==1.5.2",  # Working, but lacks some features.
     "mosqlient>=2.1.2",
     "epiweeks>=2.3.0",
     "jupyter>=1.0.0",
-    "pmdarima>=2.0.4",
     "python-dotenv>=1.0.1",
-
+    "scikit-learn>=1.8.0",
+    "numpy>=2.4.4",
+    "pandas>=2.3.3",
+    "statsmodels>=0.14.6",
 ]
 package = true
 

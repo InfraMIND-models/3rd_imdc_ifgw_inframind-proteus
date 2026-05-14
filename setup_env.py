@@ -83,16 +83,16 @@ STEPS: list[Step] = [
         name="Enable nbdime git integration",
         cmd=["uv", "run", "nbdime", "config-git", "--enable"],
     ),
-    Step(
-        name="Configure DVC remote user for 'la_berenjena'",
-        prompts=[{
-            "key": "username",
-            "message": (
-                "Enter your username on la_berenjena server, or leave blank if "
-                "you are running directly on the server.")
-        }],
-        build_cmd=_dvc_remote_user,
-    ),
+    # Step(
+    #     name="Configure DVC remote user for 'la-berenjena'",
+    #     prompts=[{
+    #         "key": "username",
+    #         "message": (
+    #             "Enter your username on la_berenjena server, or leave blank if "
+    #             "you are running directly on the server.")
+    #     }],
+    #     build_cmd=_dvc_remote_user,
+    # ),
 ]
 
 
