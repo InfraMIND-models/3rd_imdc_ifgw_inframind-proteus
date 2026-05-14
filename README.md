@@ -22,20 +22,28 @@ Follow the instructions as prompted.
 python3 setup_env.py
 ```
 
-Activate the environment:
+Activate the environment (do that every new session):
 ```
 source .venv/bin/activate
 ```
 
-Re-activate the environment every new command line session. Alternatively, you can run without activating the environment by calling `uv run [commands]`.
-For example, running
+Alternatively, you can run without activating the environment with `uv run [commands]`.
+For example, running 
 ```
 uv run jupyter notebook
 ```
 
-will start a jupyter server already configured for the Proteus model.
+will start a jupyter server in the configured environment.
 
-To get all large data files managed via DVC, run:
+To sync data with the server, you need to create an ssh host alias named "la-berenjena".
+On `~/.ssh/config`, add this (replacing with your credentials):
+```
+Host la-berenjena
+    HostName [La Berenjena IP address]
+    User [your username]
+```
+
+Once configured, you can get all large data files managed via DVC with:
 ```
 dvc pull
 ```
