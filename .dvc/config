@@ -1,6 +1,6 @@
 [core]
-    remote = la_berenjena
-['remote "la_berenjena"']
-    url = ssh://155.210.135.88/data/Inframind/IMDC2026/dvc-store
-['remote "la_berenjena_local"']
+    remote = la-berenjena
+['remote "la-berenjena"']
+    url = ssh://la-berenjena/data/Inframind/IMDC2026/dvc-store
+['remote "la-berenjena-local"']
     url = /data/Inframind/IMDC2026/dvc-store
