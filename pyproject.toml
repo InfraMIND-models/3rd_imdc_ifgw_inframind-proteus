@@ -24,6 +24,7 @@ package = true
 [project.optional-dependencies]
 dev = [
     "plotly>=6.0.0",
+    "matplotlib>=3.9.4",
     "nbdime>=4.0.1",
     "dvc>=3.59",
     "dvc-ssh",
