@@ -2,11 +2,39 @@
 
 """
 import time
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import numba
 import pandas as pd
 import scipy, scipy.stats
+from numpy.random import Generator
+
+
+def sample_lhs(
+        lhs_param_ranges: dict[str, list[int] | list[float]],
+        num_simulations: int,
+        rng: Generator | Generator
+) -> pd.DataFrame:
+
+    # Sample required parameters with LHS
+    lhs_sampler = scipy.stats.qmc.LatinHypercube(d=len(lhs_param_ranges), rng=rng)
+    lhs_samples = lhs_sampler.random(n=num_simulations)  # Shape: (num_simulations, num_params)
+
+    # Scale samples from [0, 1] to the specified ranges
+    l_bounds = [v[0] for v in lhs_param_ranges.values()]
+    u_bounds = [v[1] for v in lhs_param_ranges.values()]
+    lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
+
+    lhs_scaled_df = pd.DataFrame(
+        lhs_scaled,
+        columns=list(lhs_param_ranges.keys()),
+    )
+
+    return lhs_scaled_df
+
 
 
 def create_logistic_rt(
@@ -185,15 +213,20 @@ class ProtoDynModel:
         # =================
         rng = np.random.default_rng(notif_rng_seed)
 
-        # Crop and normalize
+        # Crop the initial part (artificially given)
         # TODO: Handle zero denominators
         _view = infec_vec[:, self.gt_max_steps:]  # Skip initial given part
-        normalized_infec_vec = _view / _view.sum(axis=1)[:, np.newaxis]
 
-        # Rescale to match given total cases
-        expectancy_vec = normalized_infec_vec * params_table_df["notif_total_cases"].values[:, np.newaxis]
+        # # -()- Normalize by infection attack rate (curve area)
+        # normalized_infec_vec = _view / _view.sum(axis=1)[:, np.newaxis]
+        # # Rescale to match given total cases
+        # expectancy_vec = normalized_infec_vec * params_table_df["notif_total_cases"].values[:, np.newaxis]
+
+        # -()- Apply given scaling factor
+        expectancy_vec = _view * params_table_df["notif_scaling_factor"].values[:, np.newaxis]
 
 
+        print("WATCHPOINT")
 
         # Sample cases using negative binomial
         _overdisp = params_table_df["notif_nb_overdispersion"].values[:, np.newaxis]
@@ -202,6 +235,7 @@ class ProtoDynModel:
             p=_overdisp / (_overdisp + expectancy_vec),
             size=expectancy_vec.shape,
         )
+        # Signature: (num_simulations, num_time_steps)
 
 
         # Prepare output data frames (from numpy arrays)
@@ -220,7 +254,7 @@ class ProtoDynModel:
         print(cases_vec)
 
 
-        print("WATCH")
+        # print("WATCH")
         return infec_df, cases_vec
 
 
@@ -229,14 +263,23 @@ class ProtoDynModel:
 def main():
     pass
 
-    num_simulations = 5000
+    num_simulations = 100000
     num_time_steps = 50
+
+
 
     lhs_param_ranges = {
         "rt_logist_width": [5, 70],
-        "rt_logist_center": [60, 200],
+        "rt_logist_center": [10, 200],
         "rt_logist_rmax": [1.2, 4.0],
+        "notif_scaling_factor": [0.1, 8.0],
     }
+
+    # # To be implemented: Different scales for sampling
+    # sampling_scale_dict = defaultdict(
+    #     lambda: "linear",
+    #     notif_scaling_factor="log10",
+    # )
 
     # ======
 
@@ -259,22 +302,16 @@ def main():
 
         # Infection-to-notification model
         "notif_nb_overdispersion": 10.,
-        "notif_total_cases": rng.normal(loc=1000, scale=0.1 * 1000, size=num_simulations)  # Sampled separately from others
+        "notif_total_cases": rng.normal(loc=1000, scale=0.1 * 1000, size=num_simulations),  # Sampled separately from others
+        "notif_scaling_factor": 1.0,  # Only applied if using external factor
 
     }, index=range(num_simulations))
 
-    # Sample required parameters with LHS
-    lhs_sampler = scipy.stats.qmc.LatinHypercube(d=len(lhs_param_ranges), rng=rng)
-    lhs_samples = lhs_sampler.random(n=num_simulations)  # Shape: (num_simulations, num_params)
-
-    # Scale samples from [0, 1] to the specified ranges
-    l_bounds = [v[0] for v in lhs_param_ranges.values()]
-    u_bounds = [v[1] for v in lhs_param_ranges.values()]
-    lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
+    lhs_scaled_df = sample_lhs(lhs_param_ranges, num_simulations, rng)
 
     # Override values in params_table_df
-    for i, col in enumerate(lhs_param_ranges.keys()):
-        params_table_df[col] = lhs_scaled[:, i]
+    for col in lhs_scaled_df.columns:
+        params_table_df[col] = lhs_scaled_df[col]
 
     # ---
     # Initial state of the infections vector
@@ -307,6 +344,7 @@ def main():
     def quantile_agg(q):
      return lambda sr: sr.quantile(q)
 
+    # --- Plot mean and quantile of case trajectories
     df = pd.DataFrame(
         {
             "mean": cases_df.mean(axis=0),
@@ -316,9 +354,34 @@ def main():
     )
 
     fig = px.line(df, y=df.columns)
-    fig.show()
 
-    print("WATCHPOINT")
+    _fpath = Path(".local/prototype_renewal_tseries.html")
+    _fpath.parent.mkdir(exist_ok=True, parents=True)
+    fig.write_html(_fpath)
+
+    # --- Plot case trajectories for a random subset of simulations
+    num_traces = min(500, num_simulations)
+    idx = rng.choice(num_simulations, size=num_traces, replace=True)
+    cases_sample_df = cases_df.iloc[idx]
+
+    fig = px.line(
+        cases_sample_df.T.reset_index(),
+        x="t",
+        y=cases_sample_df.index,
+        # title=f"Sample of {num_traces} case trajectories",
+        # labels={"t": "Time (days)", "value": "Cases", "variable": "Simulation"},
+    )
+    _fpath = Path(".local/prototype_renewal_trajectories.html")
+    _fpath.parent.mkdir(exist_ok=True, parents=True)
+    fig.write_html(_fpath)
+
+    # import plotly.io as pio
+    # print(pio.renderers)  # Check ways to render a plotly figure
+
+    # fig.show()
+
+    # print("WATCHPOINT")
+
 
 
 if __name__ == '__main__':
