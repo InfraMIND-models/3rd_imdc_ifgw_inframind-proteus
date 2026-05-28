@@ -2,11 +2,39 @@
 
 """
 import time
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import numba
 import pandas as pd
 import scipy, scipy.stats
+from numpy.random import Generator
+
+
+def sample_lhs(
+        lhs_param_ranges: dict[str, list[int] | list[float]],
+        num_simulations: int,
+        rng: Generator | Generator
+) -> pd.DataFrame:
+
+    # Sample required parameters with LHS
+    lhs_sampler = scipy.stats.qmc.LatinHypercube(d=len(lhs_param_ranges), rng=rng)
+    lhs_samples = lhs_sampler.random(n=num_simulations)  # Shape: (num_simulations, num_params)
+
+    # Scale samples from [0, 1] to the specified ranges
+    l_bounds = [v[0] for v in lhs_param_ranges.values()]
+    u_bounds = [v[1] for v in lhs_param_ranges.values()]
+    lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
+
+    lhs_scaled_df = pd.DataFrame(
+        lhs_scaled,
+        columns=list(lhs_param_ranges.keys()),
+    )
+
+    return lhs_scaled_df
+
 
 
 def create_logistic_rt(
@@ -70,6 +98,170 @@ def create_logistic_rt(
     return rt_vec
 
 
+def nbinom_ppf_cf(q, n, p, continuity=True):
+    """
+    Continuous Cornish-Fisher approximation to the Negative Binomial PPF.
+
+    References in: https://en.wikipedia.org/wiki/Cornish%E2%80%93Fisher_expansion
+
+    Parameters
+    ----------
+    q : float
+        Quantile in (0, 1).
+
+    n : array_like
+        Number of successes parameter (> 0).
+
+    p : array_like
+        Success probability parameter in (0, 1).
+
+    continuity : bool, default=True
+        Whether to apply a +0.5 continuity correction
+        before flooring to integers.
+
+    Returns
+    -------
+    k : ndarray
+        Approximate quantiles (non-integer) of the Negative Binomial distribution.
+
+    Notes
+    -----
+    Assumes the SciPy parameterization:
+
+        X ~ nbinom(n, p)
+
+    where X counts failures before n successes.
+
+    Uses the Cornish-Fisher expansion:
+
+        x ≈ μ + σ [ z + (γ1 / 6)(z² - 1) ]
+
+    with
+
+        μ  = n(1-p)/p
+        σ² = n(1-p)/p²
+        γ1 = (2-p)/sqrt(n(1-p))
+    """
+    from scipy.stats import norm
+
+    n = np.asarray(n, dtype=np.float64)
+    p = np.asarray(p, dtype=np.float64)
+
+    z = norm.ppf(q)
+    z2 = z * z
+    z3 = z2 * z
+
+    # Mean and standard deviation
+    mu = n * (1.0 - p) / p
+    sigma = np.sqrt(n * (1.0 - p)) / p
+
+    # Skewness
+    gamma1 = (2.0 - p) / np.sqrt(n * (1.0 - p))
+    gamma2 = (p * p - 6.0 * p + 6.0) / (n * (1.0 - p))  # Third order term
+
+    # Cornish-Fisher correction
+    # cf = z + (gamma1 / 6.0) * (z2 - 1.0)  # Second order
+    cf = (  # Third order
+        z
+        + (gamma1 / 6.0) * (z2 - 1.0)
+        + (gamma2 / 24.0) * (z3 - 3.0 * z)
+        - (gamma1 * gamma1 / 36.0) * (2.0 * z3 - 5.0 * z)
+    )
+
+    x = mu + sigma * cf
+
+    if continuity:
+        # x = np.floor(x + 0.5)
+        x += 0.5
+    else:
+        pass
+        # x = np.floor(x)
+
+    # Negative binomial support starts at 0
+    return np.maximum(x, 0)#.astype(np.int64)
+
+
+def wis_score_vectorized(
+        simulations_df: pd.DataFrame,
+        observations_sr: pd.Series,
+        alphas = None,
+        weights = None,
+        weight_of_median = 0.5,
+):
+    """Compute the Weighted Interval Score (WIS) for a set of quantiles
+    and observations.
+    Operations are vectorized to handle large sets of simulations at once.
+
+    simulations_df: DataFrame with MultiIndex (quantile, i_simulation) and columns as time steps
+    observations_sr: Series with index as time steps and values as observed cases
+
+    Number of time steps must match between simulations_df and observations_sr.
+    """
+    # ============ Preamble
+    assert simulations_df.columns.equals(observations_sr.index), \
+        "Time steps in simulations and observations must match"
+
+    available_q = simulations_df.index.get_level_values("quantile").unique().values
+    available_q.sort()
+
+    assert 0.5 in available_q, "Median (0.5 quantile) must be available for WIS calculation"
+
+    if alphas is None:
+        # Infer from available quantiles
+        use_q = [q for q in available_q if q < 0.5]
+        alphas = np.array(
+            [2 * q for q in use_q]
+        )
+
+    if weights is None:
+        weights = alphas / 2.  # Default WIS weights
+
+    # TODO: Assert simmetry of quantiles to be used
+
+    # ========= Calculation
+
+    # Precompute the expanded observation vector for broadcasting
+    obs_vec = observations_sr.values[np.newaxis, :]  # Shape: (1, num_time_steps)
+
+    wis_component_list = list()
+    for alpha in alphas:
+        q_low = alpha / 2
+        q_high = 1 - alpha / 2
+
+        pred_low_vec = simulations_df.xs(q_low, level="quantile").values
+        pred_high_vec = simulations_df.xs(q_high, level="quantile").values
+        # Shape: (num_simulations, num_time_steps)
+
+        high_pred_penalty = np.maximum(0, obs_vec - pred_high_vec)
+        low_pred_penalty = np.maximum(0, pred_low_vec - obs_vec)
+
+        wis_sharpness = pred_high_vec - pred_low_vec  # WIS sharpness
+        wis_calibration = (2 / alpha) * (high_pred_penalty + low_pred_penalty)
+        wis_component = wis_sharpness + wis_calibration
+
+        wis_component_list.append(wis_component)
+
+    # Separate calculation for median
+    pred_median = simulations_df.xs(0.5, level="quantile").values
+    wis_median_component = np.abs(pred_median - obs_vec)
+    # Shape: (num_simulations, num_time_steps)
+
+    # Aggregate WIS components accross quantiles
+
+    # Start with the median
+    wis = wis_median_component * weight_of_median
+    # Shape: (num_simulations, num_time_steps)
+
+    for i, alpha in enumerate(alphas):
+        wis += wis_component_list[i] * weights[i]
+
+    # Final normalization (number of prediction intervals)
+    wis /= (len(alphas) + 0.5)
+
+    return wis
+
+
+
 class ProtoDynModel:
     """Prototype dynamic model"""
 
@@ -93,6 +285,7 @@ class ProtoDynModel:
             params_table_df: pd.DataFrame,
             initial_infec_df: pd.DataFrame,
             notif_rng_seed: int = 0,
+            case_beam_quantiles = None
     ):
         """
         Signature of params_table:
@@ -108,6 +301,10 @@ class ProtoDynModel:
         assert initial_infec_df.shape[0] == num_simulations, "initial_infec_df must have num_simulations rows"
         assert initial_infec_df.shape[1] == self.gt_max_steps
 
+        if case_beam_quantiles is None:
+            case_beam_quantiles = np.array([
+                0.025, 0.25, 0.5, 0.75, 0.975
+            ])
 
         # ----------
         simulation_i_steps = np.arange(
@@ -177,7 +374,6 @@ class ProtoDynModel:
                 )
             )
 
-
         print(infec_vec)
 
 
@@ -185,24 +381,69 @@ class ProtoDynModel:
         # =================
         rng = np.random.default_rng(notif_rng_seed)
 
-        # Crop and normalize
-        # TODO: Handle zero denominators
+        # Crop the initial part (artificially given)
         _view = infec_vec[:, self.gt_max_steps:]  # Skip initial given part
-        normalized_infec_vec = _view / _view.sum(axis=1)[:, np.newaxis]
 
-        # Rescale to match given total cases
-        expectancy_vec = normalized_infec_vec * params_table_df["notif_total_cases"].values[:, np.newaxis]
+        # # -()- Normalize by infection attack rate (curve area)
+        # TODO: Handle zero denominators
+        # normalized_infec_vec = _view / _view.sum(axis=1)[:, np.newaxis]
+        # # Rescale to match given total cases
+        # expectancy_vec = normalized_infec_vec * params_table_df["notif_total_cases"].values[:, np.newaxis]
+
+        # -()- Apply given scaling factor
+        expectancy_vec = _view * params_table_df["notif_scaling_factor"].values[:, np.newaxis]
 
 
+        print("WATCHPOINT")
 
-        # Sample cases using negative binomial
+        # --- Sample cases using negative binomial
         _overdisp = params_table_df["notif_nb_overdispersion"].values[:, np.newaxis]
         cases_vec = rng.negative_binomial(
             n=_overdisp,
             p=_overdisp / (_overdisp + expectancy_vec),
             size=expectancy_vec.shape,
         )
+        # Signature: (num_simulations, num_time_steps)
 
+        # --- Calculate case beam quantiles for each simulaiton with negative binomial
+        # OBS: TOooo slow for large num_simulations
+        # _overdisp = params_table_df["notif_nb_overdispersion"].values[:, np.newaxis]
+        case_beam_df_list = list()
+        for q in case_beam_quantiles:
+            # # -()- Exact with scipy (slow if large)
+            # q_vec = scipy.stats.nbinom.ppf(
+            #     q=q,
+            #     n=_overdisp,
+            #     p=_overdisp / (_overdisp + expectancy_vec),
+            # )
+
+            # -()- Approximate with Cornish-Fisher (fast)
+            q_vec = nbinom_ppf_cf(
+                q=q,
+                n=_overdisp,
+                p=_overdisp / (_overdisp + expectancy_vec), continuity=False
+
+            )
+
+            # - Compare the two
+            # _diff = q_vec_cf - q_vec
+            # _rel_diff = _diff / expectancy_vec
+            #
+            # import matplotlib.pyplot as plt
+            # reldiff_df = pd.DataFrame(_rel_diff)
+            # fig, ax = plt.subplots()
+            #
+            # ax.plot(_diff.T)
+            # fig.show()
+
+            # Signature of q_vec: (num_simulations, num_time_steps)
+
+            case_beam_df_list.append(pd.DataFrame(q_vec))
+
+        case_beam_df = pd.concat(case_beam_df_list, keys=case_beam_quantiles, names=["quantile", "i_simulation"])
+        # Signature: df.loc[(quantile, i_simulation), t] = quantile of the case "beam"
+
+        print(case_beam_df)
 
         # Prepare output data frames (from numpy arrays)
         infec_df = pd.DataFrame(
@@ -211,32 +452,48 @@ class ProtoDynModel:
         infec_df.index.name = "i_simulation"
         infec_df.columns.name = "t"
 
-        cases_vec = pd.DataFrame(
+        cases_df = pd.DataFrame(
             cases_vec[:, :], columns=simulation_t_values,
         )
-        cases_vec.index.name = "i_simulation"
-        cases_vec.columns.name = "t"
+        cases_df.index.name = "i_simulation"
+        cases_df.columns.name = "t"
 
-        print(cases_vec)
-
-
-        print("WATCH")
-        return infec_df, cases_vec
+        print(cases_df)
 
 
+        # print("WATCH")
+        return infec_df, cases_df, case_beam_df
 
 
 def main():
-    pass
 
-    num_simulations = 5000
+    num_simulations = 1000000
     num_time_steps = 50
 
-    lhs_param_ranges = {
-        "rt_logist_width": [5, 70],
-        "rt_logist_center": [60, 200],
-        "rt_logist_rmax": [1.2, 4.0],
-    }
+    # --- Select location & start date
+    # Obs: Target files preliminarily generated in `explore_mosqlimate_data.ipynb`
+    # uf = "AP"
+    uf = "DF"
+    # uf = "RO"
+    # uf = "RR"
+    # uf = "SP"
+    # date_zero = pd.Timestamp("2015-10-05")
+    # date_zero = pd.Timestamp("2019-10-06")
+    # date_zero = pd.Timestamp("2021-10-04")
+    # date_zero = pd.Timestamp("2022-10-03")
+    date_zero = pd.Timestamp("2023-10-02")
+
+    tgt_data_df = pd.read_csv(
+        f".local/dengue/cases_tseries_{uf}.csv",
+        parse_dates=["date"]
+    )
+
+
+    # # To be implemented: Different scales for sampling
+    # sampling_scale_dict = defaultdict(
+    #     lambda: "linear",
+    #     notif_scaling_factor="log10",
+    # )
 
     # ======
 
@@ -259,22 +516,24 @@ def main():
 
         # Infection-to-notification model
         "notif_nb_overdispersion": 10.,
-        "notif_total_cases": rng.normal(loc=1000, scale=0.1 * 1000, size=num_simulations)  # Sampled separately from others
+        "notif_total_cases": rng.normal(loc=1000, scale=0.1 * 1000, size=num_simulations),  # Sampled separately from others
+        "notif_scaling_factor": 1.0,  # Only applied if using external factor
 
     }, index=range(num_simulations))
 
-    # Sample required parameters with LHS
-    lhs_sampler = scipy.stats.qmc.LatinHypercube(d=len(lhs_param_ranges), rng=rng)
-    lhs_samples = lhs_sampler.random(n=num_simulations)  # Shape: (num_simulations, num_params)
+    # Parameters to be explored
+    lhs_param_ranges = {
+        "rt_logist_width": [1, 80],
+        "rt_logist_center": [10, 280],
+        "rt_logist_rmax": [1.1, 4.0],
+        "notif_nb_overdispersion": [0.1, 100],
+        "notif_scaling_factor": [10, 3000],
+    }
 
-    # Scale samples from [0, 1] to the specified ranges
-    l_bounds = [v[0] for v in lhs_param_ranges.values()]
-    u_bounds = [v[1] for v in lhs_param_ranges.values()]
-    lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
-
-    # Override values in params_table_df
-    for i, col in enumerate(lhs_param_ranges.keys()):
-        params_table_df[col] = lhs_scaled[:, i]
+    # Override sampled values in params_table_df
+    lhs_scaled_df = sample_lhs(lhs_param_ranges, num_simulations, rng)
+    for col in lhs_scaled_df.columns:
+        params_table_df[col] = lhs_scaled_df[col]
 
     # ---
     # Initial state of the infections vector
@@ -286,6 +545,8 @@ def main():
     initial_infec_df.index.name = "i_simulation"
     initial_infec_df.columns.name = "t"
 
+    # Run the model once
+    # =================
     print(f"Running multiple: {num_simulations}")
     xt0 = time.time()
     results = model.run_multiple(
@@ -296,29 +557,118 @@ def main():
     )
     xtf = time.time()
 
-    infec_df, cases_df = results
+    infec_df, cases_df, case_beam_df = results
     cases_df: pd.DataFrame
     print(f"Execution time: {xtf - xt0:0.2e}s")
+
+
+    # Evaluate all simulations (case beams)
+    # ============
+    # Crop observations to the same time range
+    sr = tgt_data_df.set_index("date")["casos"]
+    date_start = date_zero
+    date_end = date_zero + pd.Timedelta(weeks=num_time_steps)
+    sr = sr.loc[date_start:date_end - pd.Timedelta(days=1)]  # Inclusive end, so subtract one day
+    observations_sr = sr.reset_index(drop=True)
+
+    assert sr.shape[0] == case_beam_df.shape[1]  # Check number of time steps
+
+    # Calculate WIS for all simulations
+    wis_array = wis_score_vectorized(
+        simulations_df=case_beam_df,
+        observations_sr=observations_sr
+    )
+    # Shape: (num_simulations, num_time_steps)
+    wis_total_array = wis_array.sum(axis=1)  # Total WIS for each simulation
+    # Shape: (num_simulations,)
+
+
+
+
 
     # Preliminary visualization
     # =========
     import plotly.express as px
+    import matplotlib.pyplot as plt
+    plt.rcParams["patch.linewidth"] = 0
 
     def quantile_agg(q):
-     return lambda sr: sr.quantile(q)
+        return lambda sr: sr.quantile(q)
 
-    df = pd.DataFrame(
-        {
-            "mean": cases_df.mean(axis=0),
-            "Q02.5%": cases_df.quantile(0.025, axis=0),
-            "Q97.5%": cases_df.quantile(0.975, axis=0),
-        }
+    # --- Plot the exact best simulation and the data
+    best_wis_idx = np.argmin(wis_total_array)
+    best_simulation_cases_sr = cases_df.iloc[best_wis_idx]
+    df = case_beam_df.xs(best_wis_idx, level="i_simulation")
+
+    pred_df = df.T
+    # Shape: (num_time_steps, num_quantiles)
+
+    #
+    fig, ax = plt.subplots()
+    ax.plot(
+        pred_df.index, pred_df[0.5], "--", label="Predicted median", color="midnightblue"
     )
+    for iqr in [0.5, 0.95]:
+        q_low = round((1 - iqr) / 2, 6)
+        q_high = round(1 - q_low, 6)
+        ax.fill_between(
+            pred_df.index,
+            pred_df[q_low],
+            pred_df[q_high],
+            alpha=0.3,
+            label=f"{int(iqr*100)}% prediction interval",
+            color="midnightblue"
+        )
+    ax.plot(observations_sr, "o", color="k", label="Observed")
 
-    fig = px.line(df, y=df.columns)
+    ax.legend()
+
+    fpath = Path(f".local/prototype_renewal/best_simulation_{uf}_{date_start.date().isoformat()}.pdf")
+    fpath.parent.mkdir(exist_ok=True, parents=True)
+    fig.savefig(fpath)
     fig.show()
 
+
     print("WATCHPOINT")
+
+    # # --- Plot mean and quantile of case trajectories
+    # df = pd.DataFrame(
+    #     {
+    #         "mean": cases_df.mean(axis=0),
+    #         "Q02.5%": cases_df.quantile(0.025, axis=0),
+    #         "Q97.5%": cases_df.quantile(0.975, axis=0),
+    #     }
+    # )
+    #
+    # fig = px.line(df, y=df.columns)
+    #
+    # _fpath = Path(".local/prototype_renewal_tseries.html")
+    # _fpath.parent.mkdir(exist_ok=True, parents=True)
+    # fig.write_html(_fpath)
+
+    # --- Plot case trajectories for a random subset of simulations
+    num_traces = min(500, num_simulations)
+    idx = rng.choice(num_simulations, size=num_traces, replace=False)
+    cases_sample_df = cases_df.iloc[idx]
+
+    fig = px.line(
+        cases_sample_df.T.reset_index(),
+        x="t",
+        y=cases_sample_df.index,
+        # title=f"Sample of {num_traces} case trajectories",
+        # labels={"t": "Time (days)", "value": "Cases", "variable": "Simulation"},
+    )
+    _fpath = Path(".local/prototype_renewal_trajectories.html")
+    _fpath.parent.mkdir(exist_ok=True, parents=True)
+    fig.write_html(_fpath)
+
+    # import plotly.io as pio
+    # print(pio.renderers)  # Check ways to render a plotly figure
+
+    # fig.show()
+
+    # print("WATCHPOINT")
+
 
 
 if __name__ == '__main__':
