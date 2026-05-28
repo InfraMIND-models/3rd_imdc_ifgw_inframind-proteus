@@ -57,8 +57,34 @@ def nbinom_ppf_cf(
     np.ndarray
         Approximate quantile values (continuous, not rounded to integer).
     """
-    # TODO: implement — port from proto_renewal_model.nbinom_ppf_cf
-    raise NotImplementedError
+    from scipy.stats import norm
+
+    n = np.asarray(n, dtype=np.float64)
+    p = np.asarray(p, dtype=np.float64)
+
+    z = norm.ppf(q)
+    z2 = z * z
+    z3 = z2 * z
+
+    mu = n * (1.0 - p) / p
+    sigma = np.sqrt(n * (1.0 - p)) / p
+
+    # Third-order Cornish-Fisher skewness/kurtosis terms
+    gamma1 = (2.0 - p) / np.sqrt(n * (1.0 - p))
+    gamma2 = (p * p - 6.0 * p + 6.0) / (n * (1.0 - p))
+
+    cf = (
+        z
+        + (gamma1 / 6.0) * (z2 - 1.0)
+        + (gamma2 / 24.0) * (z3 - 3.0 * z)
+        - (gamma1 * gamma1 / 36.0) * (2.0 * z3 - 5.0 * z)
+    )
+
+    x = mu + sigma * cf
+    if continuity:
+        x += 0.5
+
+    return np.maximum(x, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -98,8 +124,49 @@ def wis_score_vectorized(
     np.ndarray
         Shape ``(num_simulations, num_time_steps)``.
     """
-    # TODO: implement — port from proto_renewal_model.wis_score_vectorized
-    raise NotImplementedError
+    assert simulations_df.columns.equals(observations_sr.index), (
+        "Time steps in simulations and observations must match"
+    )
+
+    available_q = simulations_df.index.get_level_values("quantile").unique().values
+    available_q.sort()
+
+    assert 0.5 in available_q, "Median (0.5) quantile must be present for WIS calculation"
+
+    if alphas is None:
+        use_q = [q for q in available_q if q < 0.5]
+        alphas = np.array([2 * q for q in use_q])
+
+    if weights is None:
+        weights = alphas / 2.0
+
+    obs_vec = observations_sr.values[np.newaxis, :]  # (1, num_time_steps)
+
+    wis_components = []
+    for alpha in alphas:
+        q_low = alpha / 2.0
+        q_high = 1.0 - alpha / 2.0
+
+        pred_low = simulations_df.xs(q_low, level="quantile").values
+        pred_high = simulations_df.xs(q_high, level="quantile").values
+        # Shape: (num_simulations, num_time_steps)
+
+        sharpness = pred_high - pred_low
+        calibration = (2.0 / alpha) * (
+            np.maximum(0, obs_vec - pred_high) + np.maximum(0, pred_low - obs_vec)
+        )
+        wis_components.append(sharpness + calibration)
+
+    pred_median = simulations_df.xs(0.5, level="quantile").values
+    wis_median = np.abs(pred_median - obs_vec)  # (num_simulations, num_time_steps)
+
+    wis = wis_median * weight_of_median
+    for i, alpha in enumerate(alphas):
+        wis += wis_components[i] * weights[i]
+
+    wis /= len(alphas) + 0.5
+
+    return wis
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +191,9 @@ def rmse_vectorized(
     np.ndarray
         Shape ``(num_simulations,)``.
     """
-    # TODO: implement
-    raise NotImplementedError
+    obs = observations_sr.reindex(simulations_df.columns).values  # (num_time_steps,)
+    residuals = simulations_df.values - obs[np.newaxis, :]        # (num_simulations, num_time_steps)
+    return np.sqrt(np.mean(residuals ** 2, axis=1))
 
 
 def smape_vectorized(
@@ -146,5 +214,13 @@ def smape_vectorized(
     np.ndarray
         Shape ``(num_simulations,)``.
     """
-    # TODO: implement
-    raise NotImplementedError
+    obs = observations_sr.reindex(simulations_df.columns).values  # (num_time_steps,)
+    sim = simulations_df.values                                   # (num_simulations, num_time_steps)
+    denom = np.abs(sim) + np.abs(obs[np.newaxis, :])
+    numerator = 2.0 * np.abs(sim - obs[np.newaxis, :])
+    # Where both sim and obs are zero, the term is 0/0 → treat as 0 error.
+    # Use errstate to suppress the spurious warning numpy raises before the
+    # np.where mask is applied.
+    with np.errstate(invalid="ignore"):
+        ratio = np.where(denom == 0, 0.0, numerator / denom)
+    return np.mean(ratio, axis=1)
