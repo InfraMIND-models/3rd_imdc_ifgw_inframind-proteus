@@ -24,7 +24,6 @@ dependencies = [
 dev = [
     "plotly>=6.0.0",
     "matplotlib>=3.9.4",
-    "nbdime>=4.0.1",
     "dvc>=3.59",
     "dvc-ssh",
     "numba>=0.63.1",
@@ -37,5 +36,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inframind_proteus"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "nbdime>=4.0.1",
+]
 
 
