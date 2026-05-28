@@ -66,21 +66,25 @@ def nbinom_ppf_cf(
     z2 = z * z
     z3 = z2 * z
 
-    mu = n * (1.0 - p) / p
-    sigma = np.sqrt(n * (1.0 - p)) / p
+    # When p == 1 (zero expected cases), the CF expansion is undefined but the
+    # correct answer is 0; errstate suppresses divide-by-zero/invalid warnings
+    # and np.maximum clips any NaN/negative results to 0 afterwards.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        mu = n * (1.0 - p) / p
+        sigma = np.sqrt(n * (1.0 - p)) / p
 
-    # Third-order Cornish-Fisher skewness/kurtosis terms
-    gamma1 = (2.0 - p) / np.sqrt(n * (1.0 - p))
-    gamma2 = (p * p - 6.0 * p + 6.0) / (n * (1.0 - p))
+        # Third-order Cornish-Fisher skewness/kurtosis terms
+        gamma1 = (2.0 - p) / np.sqrt(n * (1.0 - p))
+        gamma2 = (p * p - 6.0 * p + 6.0) / (n * (1.0 - p))
 
-    cf = (
-        z
-        + (gamma1 / 6.0) * (z2 - 1.0)
-        + (gamma2 / 24.0) * (z3 - 3.0 * z)
-        - (gamma1 * gamma1 / 36.0) * (2.0 * z3 - 5.0 * z)
-    )
+        cf = (
+            z
+            + (gamma1 / 6.0) * (z2 - 1.0)
+            + (gamma2 / 24.0) * (z3 - 3.0 * z)
+            - (gamma1 * gamma1 / 36.0) * (2.0 * z3 - 5.0 * z)
+        )
 
-    x = mu + sigma * cf
+        x = mu + sigma * cf
     if continuity:
         x += 0.5
 

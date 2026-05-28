@@ -28,6 +28,7 @@ import pandas as pd
 
 from .generation_time import BaseGT
 from .rt_models import BaseRT
+from .scoring import nbinom_ppf_cf, wis_score_vectorized
 
 
 # ---------------------------------------------------------------------------
@@ -225,16 +226,129 @@ class RenewalSimulator:
         -------
         SimulationOutput
         """
-        # TODO: implement
-        #   1. Validate shapes and required columns
-        #   2. Generate GT PMF via self.gt_model.get_pmf(...)
-        #   3. Generate R(t) array via self.rt_model.generate(...)
-        #   4. Assemble full infec_vec (warm-up + zero-filled future)
-        #   5. Run core renewal loop via _run_renewal_loop(...)
-        #   6. Apply observation model via _apply_observation_model(...)
-        #   7. If calibration mode, score with wis_score_vectorized(...)
-        #   8. Pack results into SimulationOutput and return
-        raise NotImplementedError
+        cfg = self.config
+        num_sim = cfg.num_simulations
+        num_steps = cfg.num_time_steps
+        gt_steps = self._gt_max_steps
+        step_dt = self._step_dt
+
+        # ------------------------------------------------------------------
+        # 1. Validate inputs
+        # ------------------------------------------------------------------
+        if params_df.shape[0] != num_sim:
+            raise ValueError(
+                f"params_df has {params_df.shape[0]} rows; expected {num_sim}"
+            )
+        if initial_infec_df.shape != (num_sim, gt_steps):
+            raise ValueError(
+                f"initial_infec_df must have shape ({num_sim}, {gt_steps}); "
+                f"got {initial_infec_df.shape}"
+            )
+        if cfg.mode == "calibration" and observations_sr is None:
+            raise ValueError("observations_sr is required in calibration mode")
+
+        # Fill config-default observation params when not in params_df
+        _params = params_df.copy()
+        if "notif_nb_overdispersion" not in _params.columns:
+            _params["notif_nb_overdispersion"] = cfg.notif_nb_overdispersion
+        if "notif_scaling_factor" not in _params.columns:
+            _params["notif_scaling_factor"] = cfg.notif_scaling_factor
+
+        self.rt_model.validate_params(_params)
+
+        # ------------------------------------------------------------------
+        # 2. GT PMF — shape (num_steps, gt_steps), reversed-lag convention
+        # ------------------------------------------------------------------
+        gt_pmf = self.gt_model.get_pmf(
+            gt_max_steps=gt_steps,
+            num_time_steps=num_steps,
+            step_dt=step_dt,
+        )
+
+        # ------------------------------------------------------------------
+        # 3. R(t) — shape (num_sim, gt_steps + num_steps)
+        #
+        # The RT time grid is in days from zero_date.  The warm-up window
+        # starts at (sim_start − gt_steps × step_dt) days from zero_date,
+        # so R(t) parameters such as rt_logist_start are expressed as days
+        # from zero_date independently of the warm-up size.
+        # ------------------------------------------------------------------
+        sim_start_day = float((cfg.temporal.sim_start - cfg.temporal.zero_date).days)
+        t_start = sim_start_day - gt_steps * step_dt
+
+        rt_vec = self.rt_model.generate(
+            params_df=_params,
+            num_time_steps=gt_steps + num_steps,
+            step_dt=step_dt,
+            t_start=t_start,
+        )
+
+        # ------------------------------------------------------------------
+        # 4. Assemble infection array (warm-up pre-filled, rest zero)
+        # ------------------------------------------------------------------
+        infec_vec = np.concatenate(
+            [
+                initial_infec_df.to_numpy(dtype=float),
+                np.zeros((num_sim, num_steps), dtype=float),
+            ],
+            axis=1,
+        )
+
+        # ------------------------------------------------------------------
+        # 5. Core renewal loop
+        # ------------------------------------------------------------------
+        infec_vec = self._run_renewal_loop(
+            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+        )
+
+        # ------------------------------------------------------------------
+        # 6. Observation model (crop warm-up first)
+        # ------------------------------------------------------------------
+        rng = np.random.default_rng(cfg.rng_seed)
+        infec_sim = infec_vec[:, gt_steps:]  # (num_sim, num_steps)
+
+        cases_vec, case_beam_df = self._apply_observation_model(
+            infec_sim, _params, rng
+        )
+
+        # ------------------------------------------------------------------
+        # 7. Assign timestamp columns
+        # ------------------------------------------------------------------
+        sim_timestamps = pd.date_range(
+            start=cfg.temporal.sim_start,
+            periods=num_steps,
+            freq=pd.tseries.offsets.Day(step_dt),
+        )
+
+        infec_df = pd.DataFrame(infec_sim, columns=sim_timestamps)
+        infec_df.index.name = "i_simulation"
+        infec_df.columns.name = "t"
+
+        cases_df = pd.DataFrame(cases_vec, columns=sim_timestamps)
+        cases_df.index.name = "i_simulation"
+        cases_df.columns.name = "t"
+
+        case_beam_df.columns = sim_timestamps
+        case_beam_df.columns.name = "t"
+
+        # ------------------------------------------------------------------
+        # 8. WIS scoring (calibration mode only)
+        # ------------------------------------------------------------------
+        wis_array = None
+        if cfg.mode == "calibration":
+            common_t = case_beam_df.columns.intersection(observations_sr.index)
+            wis_array = wis_score_vectorized(
+                simulations_df=case_beam_df[common_t],
+                observations_sr=observations_sr.loc[common_t],
+            )
+
+        return SimulationOutput(
+            infec_df=infec_df,
+            cases_df=cases_df,
+            case_beam_df=case_beam_df,
+            wis_array=wis_array,
+            config=cfg,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -244,7 +358,7 @@ class RenewalSimulator:
     def _run_renewal_loop(
         infec_vec: np.ndarray,
         rt_vec: np.ndarray,
-        gt_pmf_reverse: np.ndarray,
+        gt_pmf: np.ndarray,
         gt_max_steps: int,
         num_time_steps: int,
     ) -> np.ndarray:
@@ -260,8 +374,12 @@ class RenewalSimulator:
             The first ``gt_max_steps`` columns are pre-filled (warm-up).
         rt_vec:
             R(t) array of the same shape as ``infec_vec``.
-        gt_pmf_reverse:
-            Reversed GT PMF of shape ``(num_simulations, gt_max_steps)``.
+        gt_pmf:
+            Generation time PMF of shape ``(num_time_steps, gt_max_steps)``.
+            Axis 1 follows the *reversed-lag* convention: index 0 is the
+            largest lag (oldest), index ``-1`` is lag 1 (most recent step).
+            This ordering aligns directly with the look-back window slices
+            so no further reversal is needed inside the loop.
         gt_max_steps:
             Size of the warm-up / look-back window.
         num_time_steps:
@@ -277,10 +395,26 @@ class RenewalSimulator:
         This method intentionally avoids pandas objects and Python-level
         data structures so that a future ``@numba.njit`` decoration requires
         only minimal changes.
+
+        Renewal equation at simulation step ``i`` (0-based)::
+
+            I(t_i) = Σ_s  R(t_{i-s}) · I(t_{i-s}) · w_i(s)
+
+        where the sum runs over ``s = 1..gt_max_steps`` (the look-back
+        window), and ``w_i`` is the GT PMF row for step ``i``.
         """
-        # TODO: implement — port the time loop from
-        #   proto_renewal_model.ProtoDynModel.run_multiple
-        raise NotImplementedError
+        for i_sim_step in range(num_time_steps):
+            i_full = gt_max_steps + i_sim_step
+            # Look-back window: columns [i_sim_step, i_full)
+            # Shape of each slice: (num_simulations, gt_max_steps)
+            # gt_pmf[i_sim_step] broadcasts as (gt_max_steps,)
+            infec_vec[:, i_full] = np.sum(
+                rt_vec[:, i_sim_step:i_full]
+                * infec_vec[:, i_sim_step:i_full]
+                * gt_pmf[i_sim_step],
+                axis=1,
+            )
+        return infec_vec
 
     def _apply_observation_model(
         self,
@@ -305,12 +439,39 @@ class RenewalSimulator:
         -------
         cases_vec : np.ndarray
             Sampled case counts.  Shape ``(num_simulations, num_time_steps)``.
+            dtype int64.
         case_beam_df : pd.DataFrame
             Deterministic case beam.
-            MultiIndex ``(quantile, i_simulation)``, columns = time steps.
+            MultiIndex ``(quantile, i_simulation)``, integer columns
+            ``0..num_time_steps-1`` (renamed to timestamps by the caller).
         """
-        # TODO: implement
-        raise NotImplementedError
+        overdisp = params_df["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
+        scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
+
+        # Expected reported cases; clip to avoid negative expectations
+        expectancy = np.clip(infec_vec * scale_f, 0.0, None)
+
+        # NB success probability: p = n / (n + μ)
+        # When expectancy = 0 → p = 1 → NB always draws 0 (correct)
+        p = overdisp / (overdisp + expectancy)
+
+        # Stochastic sample (integer counts)
+        cases_vec = rng.negative_binomial(n=overdisp, p=p)
+
+        # Deterministic quantile beam via Cornish-Fisher approximation
+        beam_frames = [
+            pd.DataFrame(
+                nbinom_ppf_cf(q=q, n=overdisp, p=p, continuity=False)
+            )
+            for q in self.config.case_beam_quantiles
+        ]
+        case_beam_df = pd.concat(
+            beam_frames,
+            keys=self.config.case_beam_quantiles,
+            names=["quantile", "i_simulation"],
+        )
+
+        return cases_vec, case_beam_df
 
     # ------------------------------------------------------------------
     # Factory

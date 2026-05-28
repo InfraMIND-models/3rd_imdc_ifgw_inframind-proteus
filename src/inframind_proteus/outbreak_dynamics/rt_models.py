@@ -37,6 +37,7 @@ class BaseRT(ABC):
         params_df: pd.DataFrame,
         num_time_steps: int,
         step_dt: int,
+        t_start: float = 0.0,
     ) -> np.ndarray:
         """Generate a 2D array of R(t) trajectories.
 
@@ -49,6 +50,10 @@ class BaseRT(ABC):
             Total number of time steps to produce (warm-up + simulation).
         step_dt:
             Duration of each time step in days.
+        t_start:
+            Day offset of the first time step, measured in days from
+            ``zero_date``.  Defaults to 0.0.  Pass a negative value when
+            the warm-up window starts before ``zero_date``.
 
         Returns
         -------
@@ -106,6 +111,7 @@ class LogisticRT(BaseRT):
         params_df: pd.DataFrame,
         num_time_steps: int,
         step_dt: int,
+        t_start: float = 0.0,
     ) -> np.ndarray:
         """Generate logistic R(t) trajectories.
 
@@ -117,6 +123,8 @@ class LogisticRT(BaseRT):
             Number of time steps (columns in output).
         step_dt:
             Duration of each time step in days.
+        t_start:
+            Day offset of the first time step from ``zero_date``.
 
         Returns
         -------
@@ -125,8 +133,8 @@ class LogisticRT(BaseRT):
         """
         self.validate_params(params_df)
 
-        # Time axis in days: shape (num_time_steps,)
-        time_grid = np.arange(num_time_steps, dtype=float) * step_dt
+        # Time axis in days from zero_date: shape (num_time_steps,)
+        time_grid = t_start + np.arange(num_time_steps, dtype=float) * step_dt
 
         # Per-simulation parameters, reshaped to (num_simulations, 1) for broadcasting
         rt_roff   = params_df["rt_logist_roff"].to_numpy()[:, np.newaxis]
@@ -141,8 +149,11 @@ class LogisticRT(BaseRT):
         active = (time_grid >= rt_start) & (time_grid < rt_end)
 
         # Declining logistic: rmax at onset, rmin at saturation
-        exponent = (rt_center - time_grid) / rt_width
-        logistic_vals = rt_rmax - (rt_rmax - rt_rmin) / (1.0 + np.exp(exponent))
+        # exp() may overflow when the exponent is very large (t far before center),
+        # which is correct — the logistic saturates to rmax in that limit.
+        with np.errstate(over="ignore"):
+            exponent = (rt_center - time_grid) / rt_width
+            logistic_vals = rt_rmax - (rt_rmax - rt_rmin) / (1.0 + np.exp(exponent))
 
         # Outside the active window R(t) = roff
         return np.where(active, logistic_vals, rt_roff)
