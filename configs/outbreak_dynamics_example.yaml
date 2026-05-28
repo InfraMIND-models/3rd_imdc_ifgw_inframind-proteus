@@ -32,8 +32,8 @@ location:
 generation_time:
   model: constant_gamma
   params:
-    gt_gamma_shape: 10.0
-    gt_gamma_scale: 1.8          # mean = shape × scale ≈ 18 days
+    shape: 10.0
+    scale: 1.8          # mean = shape × scale ≈ 18 days
 
 # ----------------------------------------------------------------------------
 reproduction_number:
