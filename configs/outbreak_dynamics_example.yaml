@@ -1,0 +1,79 @@
+# Example configuration for the inframind-proteus outbreak dynamics simulator.
+#
+# All fields can be overridden via CLI:
+#   --set section.key=value     (generic dot-notation override)
+#   --<named-param> value       (shortcut for important parameters)
+# ----------------------------------------------------------------------------
+
+simulation:
+  mode: calibration            # "calibration" | "projection"
+  num_simulations: 1000
+  num_time_steps: 50           # steps after the warm-up window
+  gt_max: 49                   # maximum generation time (days)
+  rng_seed: 123
+
+# ----------------------------------------------------------------------------
+temporal:
+  # Timestamps accept: ISO date ("YYYY-MM-DD"), float days, or YYYYWW integer.
+  zero_date: "2023-10-02"
+  sim_start: "2023-10-02"
+  calibration_start: "2023-10-02"    # calibration mode only
+  calibration_end:   "2024-04-01"    # calibration mode only
+  step_dt: 7                         # days per step (7 = weekly)
+
+# ----------------------------------------------------------------------------
+location:
+  # location_id_variable: one of geocode | uf | uf_code |
+  #                        regional_geocode | macrorregional_geocode
+  location_id_variable: "uf"
+  location_id: "DF"
+
+# ----------------------------------------------------------------------------
+generation_time:
+  model: constant_gamma
+  params:
+    gt_gamma_shape: 10.0
+    gt_gamma_scale: 1.8          # mean = shape × scale ≈ 18 days
+
+# ----------------------------------------------------------------------------
+reproduction_number:
+  model: logistic
+  # Fixed (non-sampled) defaults — overridden by sampling.lhs_params below
+  # for dimensions that are sampled.
+  params:
+    rt_logist_roff:   1.0        # off-season / pre-outbreak R
+    rt_logist_start:  50.0       # activation day
+    rt_logist_center: 100.0      # inflection point (days)
+    rt_logist_width:  13.0       # steepness (days); larger = smoother
+    rt_logist_rmin:   0.2        # post-outbreak floor R
+    rt_logist_rmax:   1.6        # peak R ("R0"-like)
+
+# ----------------------------------------------------------------------------
+sampling:
+  # Parameters to explore with Latin Hypercube Sampling.
+  # Ranges are [lower_bound, upper_bound].
+  # Listed parameters override the fixed values above.
+  lhs_params:
+    rt_logist_width:          [1,    80  ]
+    rt_logist_center:         [10,   280 ]
+    rt_logist_rmax:           [1.1,  4.0 ]
+    notif_nb_overdispersion:  [0.1,  100 ]
+    notif_scaling_factor:     [10,   3000]
+
+# ----------------------------------------------------------------------------
+observation_model:
+  params:
+    notif_nb_overdispersion: 10.0
+    notif_scaling_factor:     1.0
+
+# ----------------------------------------------------------------------------
+scoring:
+  case_beam_quantiles: [0.025, 0.25, 0.5, 0.75, 0.975]
+
+# ----------------------------------------------------------------------------
+output:
+  output_dir: "outputs/outbreak_dynamics"
+  save_infec_trajectories: true
+  save_cases_trajectories: true
+  save_case_beam: true
+  save_scores: true          # written only in calibration mode
