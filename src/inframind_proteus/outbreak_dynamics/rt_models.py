@@ -6,9 +6,10 @@ parameters (one row per simulation), produce a 2D numpy array of R(t) values.
 Available models
 ----------------
 LogisticRT
-    Negative-logistic (inverted sigmoid) R(t) with off-season activation.
-    Parameters: rt_logist_roff, rt_logist_start, rt_logist_center,
-                rt_logist_width, rt_logist_rmin, rt_logist_rmax
+    Negative-logistic (inverted sigmoid) R(t) with a bounded active window.
+    Parameters: rt_logist_roff, rt_logist_start, rt_logist_end,
+                rt_logist_center, rt_logist_width, rt_logist_rmin,
+                rt_logist_rmax
 """
 
 from __future__ import annotations
@@ -66,25 +67,34 @@ class BaseRT(ABC):
 
 
 class LogisticRT(BaseRT):
-    """Negative-logistic (inverted sigmoid) R(t) with off-season activation.
+    """Negative-logistic (inverted sigmoid) R(t) with a bounded active window.
 
-    Before ``rt_logist_start`` the trajectory is flat at ``rt_logist_roff``.
-    After that it follows a declining logistic curve from ``rt_logist_rmax``
-    toward ``rt_logist_rmin``, centred at ``rt_logist_center``.
+    The trajectory has three regions:
+
+    * ``t < rt_logist_start``  : flat at ``rt_logist_roff``
+    * ``rt_logist_start <= t < rt_logist_end`` : declining logistic curve
+      starting near ``rt_logist_rmax`` and asymptoting to ``rt_logist_rmin``
+    * ``t >= rt_logist_end``   : returns to ``rt_logist_roff``
+
+    The logistic formula (decreasing from *rmax* toward *rmin*) is::
+
+        R(t) = rmax - (rmax - rmin) / (1 + exp((center - t) / width))
 
     Expected columns in ``params_df``
     ----------------------------------
-    rt_logist_roff    : R value before activation (off-season baseline)
-    rt_logist_start   : Day (float) at which the logistic activates
+    rt_logist_roff    : R value outside the active window (off-season baseline)
+    rt_logist_start   : Day (float) at which the logistic window opens
+    rt_logist_end     : Day (float) at which the logistic window closes
     rt_logist_center  : Inflection point of the logistic (days)
     rt_logist_width   : Steepness parameter (days); larger = smoother decline
-    rt_logist_rmin    : Post-outbreak minimum R
-    rt_logist_rmax    : Peak / "R0"-like maximum R
+    rt_logist_rmin    : Asymptotic minimum R during outbreak
+    rt_logist_rmax    : Peak / "R0"-like maximum R at outbreak onset
     """
 
     required_params: list[str] = [
         "rt_logist_roff",
         "rt_logist_start",
+        "rt_logist_end",
         "rt_logist_center",
         "rt_logist_width",
         "rt_logist_rmin",
@@ -99,11 +109,40 @@ class LogisticRT(BaseRT):
     ) -> np.ndarray:
         """Generate logistic R(t) trajectories.
 
+        Parameters
+        ----------
+        params_df:
+            One row per simulation; must contain all :attr:`required_params`.
+        num_time_steps:
+            Number of time steps (columns in output).
+        step_dt:
+            Duration of each time step in days.
+
         Returns
         -------
         np.ndarray
             Shape ``(num_simulations, num_time_steps)``.
         """
         self.validate_params(params_df)
-        # TODO: implement — port from proto_renewal_model.create_logistic_rt
-        raise NotImplementedError
+
+        # Time axis in days: shape (num_time_steps,)
+        time_grid = np.arange(num_time_steps, dtype=float) * step_dt
+
+        # Per-simulation parameters, reshaped to (num_simulations, 1) for broadcasting
+        rt_roff   = params_df["rt_logist_roff"].to_numpy()[:, np.newaxis]
+        rt_start  = params_df["rt_logist_start"].to_numpy()[:, np.newaxis]
+        rt_end    = params_df["rt_logist_end"].to_numpy()[:, np.newaxis]
+        rt_center = params_df["rt_logist_center"].to_numpy()[:, np.newaxis]
+        rt_width  = params_df["rt_logist_width"].to_numpy()[:, np.newaxis]
+        rt_rmin   = params_df["rt_logist_rmin"].to_numpy()[:, np.newaxis]
+        rt_rmax   = params_df["rt_logist_rmax"].to_numpy()[:, np.newaxis]
+
+        # Active window: [start, end)  →  shape (num_simulations, num_time_steps)
+        active = (time_grid >= rt_start) & (time_grid < rt_end)
+
+        # Declining logistic: rmax at onset, rmin at saturation
+        exponent = (rt_center - time_grid) / rt_width
+        logistic_vals = rt_rmax - (rt_rmax - rt_rmin) / (1.0 + np.exp(exponent))
+
+        # Outside the active window R(t) = roff
+        return np.where(active, logistic_vals, rt_roff)

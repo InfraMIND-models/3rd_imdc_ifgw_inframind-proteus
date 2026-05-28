@@ -41,11 +41,12 @@ reproduction_number:
   # Fixed (non-sampled) defaults — overridden by sampling.lhs_params below
   # for dimensions that are sampled.
   params:
-    rt_logist_roff:   1.0        # off-season / pre-outbreak R
-    rt_logist_start:  50.0       # activation day
+    rt_logist_roff:   1.0        # R outside the active window (off-season)
+    rt_logist_start:  50.0       # day the logistic window opens
+    rt_logist_end:    280.0      # day the logistic window closes (returns to roff)
     rt_logist_center: 100.0      # inflection point (days)
     rt_logist_width:  13.0       # steepness (days); larger = smoother
-    rt_logist_rmin:   0.2        # post-outbreak floor R
+    rt_logist_rmin:   0.2        # asymptotic minimum R during outbreak
     rt_logist_rmax:   1.6        # peak R ("R0"-like)
 
 # ----------------------------------------------------------------------------
