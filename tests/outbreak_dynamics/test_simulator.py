@@ -56,6 +56,8 @@ def make_config(
     sim_start: str = "2024-01-01",
     rng_seed: int = 42,
     case_beam_quantiles: list[float] | None = None,
+    calibration_start: str | None = None,
+    calibration_end: str | None = None,
 ) -> SimulationConfig:
     if case_beam_quantiles is None:
         case_beam_quantiles = [0.025, 0.5, 0.975]
@@ -68,6 +70,8 @@ def make_config(
             zero_date=pd.Timestamp(zero_date),
             sim_start=pd.Timestamp(sim_start),
             step_dt=step_dt,
+            calibration_start=pd.Timestamp(calibration_start) if calibration_start else None,
+            calibration_end=pd.Timestamp(calibration_end) if calibration_end else None,
         ),
         case_beam_quantiles=case_beam_quantiles,
         rng_seed=rng_seed,
@@ -405,41 +409,59 @@ class TestRun:
     # --- Calibration mode ---
 
     def test_calibration_mode_wis_not_none(self):
-        sim_cal = make_simulator(
-            num_sim=3, num_steps=4, step_dt=7, gt_max=7, mode="calibration"
+        # sim: 2024-01-01, 2024-01-08, 2024-01-15, 2024-01-22 (step_dt=7, 4 steps)
+        # calibration window = full simulation range
+        cfg = make_config(
+            num_sim=3, num_steps=4, step_dt=7, gt_max=7, mode="calibration",
+            sim_start="2024-01-01",
+            calibration_start="2024-01-01",
+            calibration_end="2024-01-22",
+        )
+        sim_cal = RenewalSimulator(
+            rt_model=LogisticRT(),
+            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+            config=cfg,
         )
         params = make_params_df(sim_cal.config.num_simulations)
         gt_steps = sim_cal._gt_max_steps
-        initial = pd.DataFrame(
-            np.ones((sim_cal.config.num_simulations, gt_steps))
-        )
-        # Build observations aligned to output timestamps
+        initial = pd.DataFrame(np.ones((sim_cal.config.num_simulations, gt_steps)))
         timestamps = pd.date_range(
-            start=sim_cal.config.temporal.sim_start,
-            periods=sim_cal.config.num_time_steps,
-            freq=pd.tseries.offsets.Day(sim_cal.config.temporal.step_dt),
+            start=cfg.temporal.sim_start,
+            periods=cfg.num_time_steps,
+            freq=pd.tseries.offsets.Day(cfg.temporal.step_dt),
         )
-        obs = pd.Series(np.arange(1, sim_cal.config.num_time_steps + 1, dtype=float),
-                        index=timestamps)
+        obs = pd.Series(np.arange(1, cfg.num_time_steps + 1, dtype=float), index=timestamps)
         out = sim_cal.run(params, initial, observations_sr=obs)
         assert out.wis_array is not None
 
     def test_calibration_mode_wis_shape(self):
+        # sim: 6 weekly steps from 2024-01-01
+        # calibration window: steps 1-3 (2024-01-08 to 2024-01-22) → 3 cal steps
         num_sim, num_steps = 5, 6
-        sim_cal = make_simulator(
-            num_sim=num_sim, num_steps=num_steps, step_dt=7, gt_max=7, mode="calibration"
+        cfg = make_config(
+            num_sim=num_sim, num_steps=num_steps, step_dt=7, gt_max=7, mode="calibration",
+            sim_start="2024-01-01",
+            calibration_start="2024-01-08",
+            calibration_end="2024-01-22",
+        )
+        sim_cal = RenewalSimulator(
+            rt_model=LogisticRT(),
+            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+            config=cfg,
         )
         params = make_params_df(sim_cal.config.num_simulations)
         gt_steps = sim_cal._gt_max_steps
         initial = pd.DataFrame(np.ones((num_sim, gt_steps)))
-        timestamps = pd.date_range(
-            start=sim_cal.config.temporal.sim_start,
+        # Observations covering all 6 simulation steps (wider than calibration window)
+        all_timestamps = pd.date_range(
+            start=cfg.temporal.sim_start,
             periods=num_steps,
-            freq=pd.tseries.offsets.Day(sim_cal.config.temporal.step_dt),
+            freq=pd.tseries.offsets.Day(cfg.temporal.step_dt),
         )
-        obs = pd.Series(np.ones(num_steps, dtype=float), index=timestamps)
+        obs = pd.Series(np.ones(num_steps, dtype=float), index=all_timestamps)
         out = sim_cal.run(params, initial, observations_sr=obs)
-        assert out.wis_array.shape == (num_sim, num_steps)
+        # Only the 3 timestamps inside [calibration_start, calibration_end] are scored
+        assert out.wis_array.shape == (num_sim, 3)
 
     # --- Validation errors ---
 
@@ -456,11 +478,89 @@ class TestRun:
             sim.run(params, bad_initial)
 
     def test_validation_calibration_requires_observations(self):
-        sim_cal = make_simulator(mode="calibration")
+        cfg = make_config(
+            mode="calibration",
+            calibration_start="2024-01-01",
+            calibration_end="2024-01-22",
+        )
+        sim_cal = RenewalSimulator(
+            rt_model=LogisticRT(),
+            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+            config=cfg,
+        )
         params = make_params_df(sim_cal.config.num_simulations)
         initial = pd.DataFrame(np.ones((sim_cal.config.num_simulations, sim_cal._gt_max_steps)))
         with pytest.raises(ValueError, match="observations_sr"):
             sim_cal.run(params, initial)
+
+    def test_validation_calibration_bounds_required(self):
+        """mode='calibration' without calibration_start/end raises ValueError."""
+        cfg = make_config(mode="calibration")  # no calibration_start/calibration_end
+        sim_cal = RenewalSimulator(
+            rt_model=LogisticRT(),
+            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+            config=cfg,
+        )
+        params = make_params_df(cfg.num_simulations)
+        initial = pd.DataFrame(np.ones((cfg.num_simulations, sim_cal._gt_max_steps)))
+        timestamps = pd.date_range(
+            start=cfg.temporal.sim_start,
+            periods=cfg.num_time_steps,
+            freq=pd.tseries.offsets.Day(cfg.temporal.step_dt),
+        )
+        obs = pd.Series(np.ones(cfg.num_time_steps, dtype=float), index=timestamps)
+        with pytest.raises(ValueError, match="calibration_start"):
+            sim_cal.run(params, initial, observations_sr=obs)
+
+    def test_validation_calibration_empty_window(self):
+        """No observations inside the calibration window raises ValueError."""
+        # sim steps are in 2024; calibration window is far in the future
+        cfg = make_config(
+            mode="calibration",
+            calibration_start="2030-01-01",
+            calibration_end="2030-12-31",
+        )
+        sim_cal = RenewalSimulator(
+            rt_model=LogisticRT(),
+            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+            config=cfg,
+        )
+        params = make_params_df(cfg.num_simulations)
+        initial = pd.DataFrame(np.ones((cfg.num_simulations, sim_cal._gt_max_steps)))
+        timestamps = pd.date_range(
+            start=cfg.temporal.sim_start,
+            periods=cfg.num_time_steps,
+            freq=pd.tseries.offsets.Day(cfg.temporal.step_dt),
+        )
+        obs = pd.Series(np.ones(cfg.num_time_steps, dtype=float), index=timestamps)
+        with pytest.raises(ValueError, match="No observation data"):
+            sim_cal.run(params, initial, observations_sr=obs)
+
+    def test_validation_calibration_misaligned_timestamps(self):
+        """Calibration obs timestamps not present in simulation raise ValueError."""
+        cfg = make_config(
+            mode="calibration",
+            sim_start="2024-01-01",
+            calibration_start="2024-01-01",
+            calibration_end="2024-01-22",
+        )
+        sim_cal = RenewalSimulator(
+            rt_model=LogisticRT(),
+            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+            config=cfg,
+        )
+        params = make_params_df(cfg.num_simulations)
+        initial = pd.DataFrame(np.ones((cfg.num_simulations, sim_cal._gt_max_steps)))
+        # Observations shifted by 1 day — not aligned with weekly simulation steps
+        sim_timestamps = pd.date_range(
+            start=cfg.temporal.sim_start,
+            periods=cfg.num_time_steps,
+            freq=pd.tseries.offsets.Day(cfg.temporal.step_dt),
+        )
+        obs_timestamps = sim_timestamps + pd.Timedelta(days=1)
+        obs = pd.Series(np.ones(cfg.num_time_steps, dtype=float), index=obs_timestamps)
+        with pytest.raises(ValueError, match="absent from the simulation"):
+            sim_cal.run(params, initial, observations_sr=obs)
 
     # --- t_start / zero_date independence ---
 

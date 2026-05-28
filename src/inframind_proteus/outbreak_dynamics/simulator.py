@@ -153,8 +153,10 @@ class SimulationOutput:
         Deterministic quantile case beam.
         MultiIndex ``(quantile, i_simulation)``, same time-step columns.
     wis_array:
-        Per-simulation WIS scores over time.  ``None`` in projection mode.
-        Shape ``(num_simulations, num_time_steps)``.
+        Per-simulation WIS scores over the calibration window.  ``None`` in
+        projection mode.  Shape ``(num_simulations, n_cal)`` where ``n_cal``
+        is the number of observation timestamps that fall within
+        ``[calibration_start, calibration_end]``.
     config:
         The :class:`SimulationConfig` used to produce these outputs.
     """
@@ -212,7 +214,7 @@ class RenewalSimulator:
         ----------
         params_df:
             Parameter table.  One row per simulation.  Must contain all
-            columns required by ``rt_model`` and ``gt_model``, plus
+            columns required by ``rt_model``, plus
             ``notif_nb_overdispersion`` and ``notif_scaling_factor`` when
             those should vary across simulations.
         initial_infec_df:
@@ -246,6 +248,14 @@ class RenewalSimulator:
             )
         if cfg.mode == "calibration" and observations_sr is None:
             raise ValueError("observations_sr is required in calibration mode")
+        if cfg.mode == "calibration" and (
+            cfg.temporal.calibration_start is None
+            or cfg.temporal.calibration_end is None
+        ):
+            raise ValueError(
+                "TemporalConfig.calibration_start and calibration_end must both be "
+                "set when mode='calibration'"
+            )
 
         # Fill config-default observation params when not in params_df
         _params = params_df.copy()
@@ -336,10 +346,31 @@ class RenewalSimulator:
         # ------------------------------------------------------------------
         wis_array = None
         if cfg.mode == "calibration":
-            common_t = case_beam_df.columns.intersection(observations_sr.index)
+            cal_start = cfg.temporal.calibration_start
+            cal_end   = cfg.temporal.calibration_end
+
+            # Slice observations to the declared calibration window
+            obs_cal = observations_sr.loc[
+                (observations_sr.index >= cal_start)
+                & (observations_sr.index <= cal_end)
+            ]
+            if obs_cal.empty:
+                raise ValueError(
+                    f"No observation data within the calibration window "
+                    f"[{cal_start.date()}, {cal_end.date()}]"
+                )
+
+            # Every calibration timestamp must align exactly with a simulation step
+            missing = obs_cal.index.difference(case_beam_df.columns)
+            if not missing.empty:
+                raise ValueError(
+                    f"{len(missing)} calibration timestamp(s) are absent from the "
+                    f"simulation period. Missing: {missing[:5].tolist()}"
+                )
+
             wis_array = wis_score_vectorized(
-                simulations_df=case_beam_df[common_t],
-                observations_sr=observations_sr.loc[common_t],
+                simulations_df=case_beam_df[obs_cal.index],
+                observations_sr=obs_cal,
             )
 
         return SimulationOutput(
