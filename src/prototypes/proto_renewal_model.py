@@ -467,7 +467,7 @@ class ProtoDynModel:
 
 def main():
 
-    num_simulations = 1000000
+    num_simulations = 1000
     num_time_steps = 50
 
     # --- Select location & start date
@@ -512,7 +512,7 @@ def main():
         "rt_logist_roff": 1.0,  # Off-season R value (before start)
         "rt_logist_start": 50.,
         "rt_logist_rmin": 0.2,  # Post-outbreak baseline
-        "rt_logist_rmax": 2.5,  # Essentially "R0"
+        "rt_logist_rmax": 1.6,  # Essentially "R0"
 
         # Infection-to-notification model
         "notif_nb_overdispersion": 10.,
@@ -564,6 +564,7 @@ def main():
 
     # Evaluate all simulations (case beams)
     # ============
+    # This step will only be performed in calibration mode.
     # Crop observations to the same time range
     sr = tgt_data_df.set_index("date")["casos"]
     date_start = date_zero
@@ -595,10 +596,28 @@ def main():
     def quantile_agg(q):
         return lambda sr: sr.quantile(q)
 
+    # --- Abstract infections - Random trajectories
+    print(infec_df)
+    num_traces = min(500, num_simulations)
+    idx = rng.choice(num_simulations, size=num_traces, replace=False)
+    infec_sample_df = infec_df.iloc[idx]
+
+    fig = px.line(
+        infec_sample_df.T.reset_index(),
+        x="t",
+        y=infec_sample_df.index,
+        # title=f"Sample of {num_traces} case trajectories",
+        # labels={"t": "Time (days)", "value": "Cases", "variable": "Simulation"},
+    )
+    _fpath = Path(".local/prototype_renewal_infection_trajectories.html")
+    _fpath.parent.mkdir(exist_ok=True, parents=True)
+    fig.write_html(_fpath)
+
     # --- Plot the exact best simulation and the data
     best_wis_idx = np.argmin(wis_total_array)
     best_simulation_cases_sr = cases_df.iloc[best_wis_idx]
     df = case_beam_df.xs(best_wis_idx, level="i_simulation")
+
 
     pred_df = df.T
     # Shape: (num_time_steps, num_quantiles)
@@ -628,8 +647,6 @@ def main():
     fig.savefig(fpath)
     fig.show()
 
-
-    print("WATCHPOINT")
 
     # # --- Plot mean and quantile of case trajectories
     # df = pd.DataFrame(
