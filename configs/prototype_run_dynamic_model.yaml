@@ -15,7 +15,7 @@ simulation:
 # ----------------------------------------------------------------------------
 temporal:
   # Timestamps accept: ISO date ("YYYY-MM-DD"), float days, or YYYYWW integer.
-  zero_date: "2023-10-01"
+  zero_date: "2023-10-02"
   sim_start: "2023-10-01"
   calibration_start: "2023-10-01"    # calibration mode only
   calibration_end:   "2024-04-01"    # calibration mode only
@@ -42,10 +42,10 @@ reproduction_number:
   # for dimensions that are sampled.
   params:
     rt_logist_roff:   1.0        # R outside the active window (off-season)
-    rt_logist_start:  50.0       # day the logistic window opens
-    rt_logist_end:    280.0      # day the logistic window closes (returns to roff)
-    rt_logist_center: 100.0      # inflection point (days)
-    rt_logist_width:  13.0       # steepness (days); larger = smoother
+    rt_logist_start:  50.0       # day the logistic window opens (relative to zero_date)
+    rt_logist_end:    360.0      # day the logistic window closes (returns to roff)
+    rt_logist_center: 150.0      # inflection point (days)
+    rt_logist_width:  40.0       # steepness (days); larger = smoother
     rt_logist_rmin:   0.2        # asymptotic minimum R during outbreak
     rt_logist_rmax:   1.6        # peak R ("R0"-like)
 
@@ -56,11 +56,15 @@ sampling:
   # Ranges are [lower_bound, upper_bound].
   # Listed parameters override the fixed values above.
   param_ranges:
-    rt_logist_width:          [1,    80  ]
-    rt_logist_center:         [10,   280 ]
+#    rt_logist_width:          [1, 80  ]
+    rt_logist_width:          [25, 45  ]  # Fine
+#    rt_logist_center:         [10, 280 ]
+#    rt_logist_center:         [130,  180 ]  # Fine
+    rt_logist_start:          [10, 120]
     rt_logist_rmax:           [1.1,  4.0 ]
-    notif_nb_overdispersion:  [0.1,  100 ]
-    notif_scaling_factor:     [10,   3000]
+#    notif_nb_overdispersion:  [0.1,  100 ]
+#    notif_scaling_factor:     [100,   7000]
+#    notif_scaling_factor:     [2000, 30000]
 
 # ----------------------------------------------------------------------------
 initial_infections:
@@ -72,8 +76,8 @@ initial_infections:
 # ----------------------------------------------------------------------------
 observation_model:
   params:
-    notif_nb_overdispersion: 10.0
-    notif_scaling_factor:     1.0
+    notif_nb_overdispersion: 1000.0
+    notif_scaling_factor:     8000
 
 # ----------------------------------------------------------------------------
 scoring:
