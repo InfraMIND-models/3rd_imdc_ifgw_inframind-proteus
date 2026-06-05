@@ -707,9 +707,12 @@ class TestFactory:
         assert cfg.sampling.param_ranges["rt_logist_width"] == [1.0, 80.0]
         assert cfg.sampling.rt_params["rt_logist_roff"] == pytest.approx(1.0)
         assert cfg.sampling.observation_params["notif_nb_overdispersion"] == pytest.approx(6.5)
+        assert cfg.initial_infections.method == "ones"
 
     def test_from_config_dict_uses_defaults_when_sections_missing(self):
-        sim = RenewalSimulator.from_config_dict(config_dict={})
+        sim = RenewalSimulator.from_config_dict(
+            config_dict={"simulation": {"num_simulations": 1000}}
+        )
         defaults = SimulationConfig()
         cfg = sim.config
 
@@ -730,25 +733,31 @@ class TestFactory:
         assert cfg.notif_scaling_factor == defaults.notif_scaling_factor
         assert cfg.case_beam_quantiles == defaults.case_beam_quantiles
         assert cfg.sampling is not None
-        assert cfg.sampling.num_simulations == defaults.num_simulations
         assert cfg.sampling.method == "lhs"
         assert cfg.sampling.param_ranges == {}
+        assert cfg.initial_infections.method == "ones"
         assert cfg.rng_seed == defaults.rng_seed
 
     def test_from_config_dict_invalid_mode_raises(self):
         with pytest.raises(ValueError, match="simulation.mode"):
             RenewalSimulator.from_config_dict(
-                config_dict={"simulation": {"mode": "invalid"}},
+                config_dict={"simulation": {"mode": "invalid", "num_simulations": 10}},
             )
 
     def test_from_config_dict_invalid_rt_model_raises(self):
         with pytest.raises(ValueError, match="Unsupported reproduction_number.model"):
             RenewalSimulator.from_config_dict(
-                config_dict={"reproduction_number": {"model": "unknown_rt"}},
+                config_dict={
+                    "simulation": {"num_simulations": 10},
+                    "reproduction_number": {"model": "unknown_rt"},
+                },
             )
 
     def test_from_config_dict_invalid_gt_model_raises(self):
         with pytest.raises(ValueError, match="Unsupported generation_time.model"):
             RenewalSimulator.from_config_dict(
-                config_dict={"generation_time": {"model": "unknown_gt"}},
+                config_dict={
+                    "simulation": {"num_simulations": 10},
+                    "generation_time": {"model": "unknown_gt"},
+                },
             )

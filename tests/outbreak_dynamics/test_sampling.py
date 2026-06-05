@@ -88,15 +88,15 @@ class TestParseCalibrationSamplingConfig:
         }
 
         parsed = parse_calibration_sampling_config(config_dict)
-        assert parsed.num_simulations == 10
         assert parsed.method == "lhs"
         assert parsed.param_ranges["rt_logist_width"] == [1.0, 50.0]
         assert parsed.rt_params["rt_logist_roff"] == pytest.approx(1.0)
         assert parsed.observation_params["notif_nb_overdispersion"] == pytest.approx(10.0)
 
     def test_parse_defaults_to_lhs_with_empty_ranges(self):
-        parsed = parse_calibration_sampling_config({})
-        assert parsed.num_simulations == 1000
+        parsed = parse_calibration_sampling_config(
+            {"simulation": {"num_simulations": 10}}
+        )
         assert parsed.method == "lhs"
         assert parsed.param_ranges == {}
         assert parsed.rt_params == {}
@@ -105,32 +105,41 @@ class TestParseCalibrationSamplingConfig:
     def test_parse_rejects_unknown_method(self):
         with pytest.raises(ValueError, match="Unsupported sampling.method"):
             parse_calibration_sampling_config(
-                {"sampling": {"method": "sobol", "param_ranges": {}}}
+                {
+                    "simulation": {"num_simulations": 10},
+                    "sampling": {"method": "sobol", "param_ranges": {}},
+                }
             )
 
     def test_parse_rejects_bad_range_shape(self):
         with pytest.raises(ValueError, match=r"must be \[lo, hi\]"):
             parse_calibration_sampling_config(
-                {"sampling": {"param_ranges": {"x": [0.0, 1.0, 2.0]}}}
+                {
+                    "simulation": {"num_simulations": 10},
+                    "sampling": {"param_ranges": {"x": [0.0, 1.0, 2.0]}},
+                }
             )
 
     def test_parse_rejects_reversed_range(self):
         with pytest.raises(ValueError, match="lo > hi"):
             parse_calibration_sampling_config(
-                {"sampling": {"param_ranges": {"x": [2.0, 1.0]}}}
+                {
+                    "simulation": {"num_simulations": 10},
+                    "sampling": {"param_ranges": {"x": [2.0, 1.0]}},
+                }
             )
 
 
 class TestBuildCalibrationParamsDf:
     def test_fixed_only_returns_repeated_rows(self):
         cfg = SamplingConfig(
-            num_simulations=4,
             method="lhs",
             param_ranges={},
             rt_params={"rt_logist_roff": 1.0},
             observation_params={"notif_nb_overdispersion": 8.0},
         )
         out = build_calibration_params_df(
+            num_simulations=4,
             sampling_config=cfg,
             required_param_names=["rt_logist_roff", "notif_nb_overdispersion"],
         )
@@ -140,13 +149,13 @@ class TestBuildCalibrationParamsDf:
 
     def test_lhs_overrides_fixed_values_for_same_column(self):
         cfg = SamplingConfig(
-            num_simulations=20,
             method="lhs",
             param_ranges={"notif_scaling_factor": [10.0, 20.0]},
             rt_params={},
             observation_params={"notif_scaling_factor": 1.0},
         )
         out = build_calibration_params_df(
+            num_simulations=20,
             sampling_config=cfg,
             required_param_names=["notif_scaling_factor"],
             rng_seed=0,
@@ -158,19 +167,27 @@ class TestBuildCalibrationParamsDf:
 
     def test_lhs_reproducible_with_same_seed(self):
         cfg = SamplingConfig(
-            num_simulations=25,
             method="lhs",
             param_ranges={"x": [0.0, 1.0]},
             rt_params={},
             observation_params={},
         )
-        out1 = build_calibration_params_df(cfg, required_param_names=["x"], rng_seed=7)
-        out2 = build_calibration_params_df(cfg, required_param_names=["x"], rng_seed=7)
+        out1 = build_calibration_params_df(
+            num_simulations=25,
+            sampling_config=cfg,
+            required_param_names=["x"],
+            rng_seed=7,
+        )
+        out2 = build_calibration_params_df(
+            num_simulations=25,
+            sampling_config=cfg,
+            required_param_names=["x"],
+            rng_seed=7,
+        )
         pd.testing.assert_frame_equal(out1, out2)
 
     def test_missing_required_columns_raises(self):
         cfg = SamplingConfig(
-            num_simulations=3,
             method="lhs",
             param_ranges={},
             rt_params={"rt_logist_roff": 1.0},
@@ -178,6 +195,7 @@ class TestBuildCalibrationParamsDf:
         )
         with pytest.raises(ValueError, match="missing required columns"):
             build_calibration_params_df(
+                num_simulations=3,
                 sampling_config=cfg,
                 required_param_names=["rt_logist_roff", "notif_nb_overdispersion"],
             )

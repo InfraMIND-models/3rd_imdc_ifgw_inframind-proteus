@@ -27,6 +27,11 @@ import numpy as np
 import pandas as pd
 
 from .generation_time import BaseGT, ConstantGammaGT
+from .initial_infections import (
+    InitialInfectionsConfig,
+    build_initial_infec_df,
+    parse_initial_infections_config,
+)
 from .rt_models import BaseRT, LogisticRT
 from .sampling import SamplingConfig, parse_calibration_sampling_config
 from .scoring import nbinom_ppf_cf, wis_score_vectorized
@@ -110,6 +115,8 @@ class SimulationConfig:
     sampling:
         Optional sampling settings parsed from ``sampling`` plus fixed
         parameter dictionaries used to build calibration ``params_df``.
+    initial_infections:
+        Initial infection seeding configuration.
     rng_seed:
         Global RNG seed for the observation model sampling.
     """
@@ -136,6 +143,9 @@ class SimulationConfig:
         default_factory=lambda: [0.025, 0.25, 0.5, 0.75, 0.975]
     )
     sampling: SamplingConfig | None = None
+    initial_infections: InitialInfectionsConfig = field(
+        default_factory=InitialInfectionsConfig
+    )
     rng_seed: int = 0
 
 
@@ -389,6 +399,15 @@ class RenewalSimulator:
             config=cfg,
         )
 
+    def build_initial_infec_df(self) -> pd.DataFrame:
+        """Build the warm-up infection matrix using the config settings."""
+        return build_initial_infec_df(
+            num_simulations=self.config.num_simulations,
+            gt_max_steps=self._gt_max_steps,
+            step_dt=self._step_dt,
+            initial_config=self.config.initial_infections,
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -550,6 +569,7 @@ class RenewalSimulator:
         rt_cfg = config_dict.get("reproduction_number", {}) or {}
         gt_cfg = config_dict.get("generation_time", {}) or {}
         sampling_cfg = parse_calibration_sampling_config(config_dict)
+        initial_infections_cfg = parse_initial_infections_config(config_dict)
 
         rt_model_name = str(rt_cfg.get("model", "logistic")).strip().lower()
         if rt_model_name == "logistic":
@@ -654,6 +674,7 @@ class RenewalSimulator:
             ),
             case_beam_quantiles=case_beam_quantiles,
             sampling=sampling_cfg,
+            initial_infections=initial_infections_cfg,
             rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),
         )
 

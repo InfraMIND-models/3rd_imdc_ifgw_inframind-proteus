@@ -39,7 +39,6 @@ class SamplingConfig:
     rt_params: dict[str, float] = field(default_factory=dict)
     observation_params: dict[str, float] = field(default_factory=dict)
 
-
 def sample_lhs(
     param_ranges: dict[str, list[float]],
     num_simulations: int,

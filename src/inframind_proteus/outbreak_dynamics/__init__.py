@@ -22,6 +22,11 @@ wis_score_vectorized
 """
 
 from .generation_time import BaseGT, ConstantGammaGT
+from .initial_infections import (
+    InitialInfectionsConfig,
+    build_initial_infec_df,
+    parse_initial_infections_config,
+)
 from .rt_models import BaseRT, LogisticRT
 from .sampling import (
     SamplingConfig,
@@ -42,6 +47,7 @@ __all__ = [
     "BaseGT",
     "BaseRT",
     "ConstantGammaGT",
+    "InitialInfectionsConfig",
     "LocationConfig",
     "LogisticRT",
     "RenewalSimulator",
@@ -50,8 +56,10 @@ __all__ = [
     "SimulationOutput",
     "TemporalConfig",
     "build_calibration_params_df",
+    "build_initial_infec_df",
     "nbinom_ppf_cf",
     "parse_calibration_sampling_config",
+    "parse_initial_infections_config",
     "sample_lhs",
     "wis_score_vectorized",
 ]

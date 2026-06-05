@@ -63,6 +63,13 @@ sampling:
     notif_scaling_factor:     [10,   3000]
 
 # ----------------------------------------------------------------------------
+initial_infections:
+  # Warm-up seeding method.
+  method: ones
+  # Method parameters (currently unused for "ones").
+  params: {}
+
+# ----------------------------------------------------------------------------
 observation_model:
   params:
     notif_nb_overdispersion: 10.0
