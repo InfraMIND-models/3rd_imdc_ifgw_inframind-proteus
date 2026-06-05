@@ -479,7 +479,13 @@ class RenewalSimulator:
             MultiIndex ``(quantile, i_simulation)``, integer columns
             ``0..num_time_steps-1`` (renamed to timestamps by the caller).
         """
-        # TODO: Validate parameters for this function
+        required_cols = ["notif_nb_overdispersion", "notif_scaling_factor"]
+        missing_cols = [c for c in required_cols if c not in params_df.columns]
+        if missing_cols:
+            raise ValueError(
+                "_apply_observation_model requires params_df columns "
+                f"{required_cols}; missing: {missing_cols}"
+            )
 
         overdisp = params_df["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
         scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]

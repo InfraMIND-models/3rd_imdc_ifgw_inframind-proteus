@@ -333,6 +333,12 @@ class TestObservationModel:
         c2, _ = sim._apply_observation_model(infec, params, np.random.default_rng(7))
         np.testing.assert_array_equal(c1, c2)
 
+    def test_missing_required_params_raises(self, sim, params):
+        infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
+        bad_params = params.drop(columns=["notif_nb_overdispersion"])
+        with pytest.raises(ValueError, match="missing"):
+            sim._apply_observation_model(infec, bad_params, np.random.default_rng(0))
+
 
 # ---------------------------------------------------------------------------
 # TestRun — integration
