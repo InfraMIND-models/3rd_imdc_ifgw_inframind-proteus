@@ -51,10 +51,11 @@ reproduction_number:
 
 # ----------------------------------------------------------------------------
 sampling:
-  # Parameters to explore with Latin Hypercube Sampling.
+  # Parameters to explore during calibration.
+  method: lhs
   # Ranges are [lower_bound, upper_bound].
   # Listed parameters override the fixed values above.
-  lhs_params:
+  param_ranges:
     rt_logist_width:          [1,    80  ]
     rt_logist_center:         [10,   280 ]
     rt_logist_rmax:           [1.1,  4.0 ]

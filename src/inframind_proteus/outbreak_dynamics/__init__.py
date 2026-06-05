@@ -23,7 +23,12 @@ wis_score_vectorized
 
 from .generation_time import BaseGT, ConstantGammaGT
 from .rt_models import BaseRT, LogisticRT
-from .sampling import sample_lhs
+from .sampling import (
+    SamplingConfig,
+    build_calibration_params_df,
+    parse_calibration_sampling_config,
+    sample_lhs,
+)
 from .scoring import nbinom_ppf_cf, wis_score_vectorized
 from .simulator import (
     LocationConfig,
@@ -40,10 +45,13 @@ __all__ = [
     "LocationConfig",
     "LogisticRT",
     "RenewalSimulator",
+    "SamplingConfig",
     "SimulationConfig",
     "SimulationOutput",
     "TemporalConfig",
+    "build_calibration_params_df",
     "nbinom_ppf_cf",
+    "parse_calibration_sampling_config",
     "sample_lhs",
     "wis_score_vectorized",
 ]

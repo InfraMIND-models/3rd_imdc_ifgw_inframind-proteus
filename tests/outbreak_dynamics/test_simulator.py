@@ -634,6 +634,9 @@ class TestFactory:
         config_dict = {
             "reproduction_number": {
                 "model": "logistic",
+                "params": {
+                    "rt_logist_roff": 1.0,
+                },
             },
             "generation_time": {
                 "model": "constant_gamma",
@@ -666,6 +669,12 @@ class TestFactory:
                     "notif_scaling_factor": 2.0,
                 }
             },
+            "sampling": {
+                "method": "lhs",
+                "param_ranges": {
+                    "rt_logist_width": [1.0, 80.0],
+                },
+            },
             "scoring": {
                 "case_beam_quantiles": [0.1, 0.5, 0.9],
             },
@@ -693,6 +702,11 @@ class TestFactory:
         assert cfg.notif_nb_overdispersion == pytest.approx(6.5)
         assert cfg.notif_scaling_factor == pytest.approx(2.0)
         assert cfg.case_beam_quantiles == [0.1, 0.5, 0.9]
+        assert cfg.sampling is not None
+        assert cfg.sampling.method == "lhs"
+        assert cfg.sampling.param_ranges["rt_logist_width"] == [1.0, 80.0]
+        assert cfg.sampling.rt_params["rt_logist_roff"] == pytest.approx(1.0)
+        assert cfg.sampling.observation_params["notif_nb_overdispersion"] == pytest.approx(6.5)
 
     def test_from_config_dict_uses_defaults_when_sections_missing(self):
         sim = RenewalSimulator.from_config_dict(config_dict={})
@@ -715,6 +729,10 @@ class TestFactory:
         assert cfg.notif_nb_overdispersion == defaults.notif_nb_overdispersion
         assert cfg.notif_scaling_factor == defaults.notif_scaling_factor
         assert cfg.case_beam_quantiles == defaults.case_beam_quantiles
+        assert cfg.sampling is not None
+        assert cfg.sampling.num_simulations == defaults.num_simulations
+        assert cfg.sampling.method == "lhs"
+        assert cfg.sampling.param_ranges == {}
         assert cfg.rng_seed == defaults.rng_seed
 
     def test_from_config_dict_invalid_mode_raises(self):

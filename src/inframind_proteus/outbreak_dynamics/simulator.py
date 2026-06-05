@@ -28,6 +28,7 @@ import pandas as pd
 
 from .generation_time import BaseGT, ConstantGammaGT
 from .rt_models import BaseRT, LogisticRT
+from .sampling import SamplingConfig, parse_calibration_sampling_config
 from .scoring import nbinom_ppf_cf, wis_score_vectorized
 from .utils import parse_timestamp
 
@@ -106,6 +107,9 @@ class SimulationConfig:
         Can be overridden per-simulation via ``params_df``.
     case_beam_quantiles:
         Quantiles used to build the deterministic case prediction beam.
+    sampling:
+        Optional sampling settings parsed from ``sampling`` plus fixed
+        parameter dictionaries used to build calibration ``params_df``.
     rng_seed:
         Global RNG seed for the observation model sampling.
     """
@@ -131,6 +135,7 @@ class SimulationConfig:
     case_beam_quantiles: list[float] = field(
         default_factory=lambda: [0.025, 0.25, 0.5, 0.75, 0.975]
     )
+    sampling: SamplingConfig | None = None
     rng_seed: int = 0
 
 
@@ -544,6 +549,7 @@ class RenewalSimulator:
         scoring_cfg = config_dict.get("scoring", {}) or {}
         rt_cfg = config_dict.get("reproduction_number", {}) or {}
         gt_cfg = config_dict.get("generation_time", {}) or {}
+        sampling_cfg = parse_calibration_sampling_config(config_dict)
 
         rt_model_name = str(rt_cfg.get("model", "logistic")).strip().lower()
         if rt_model_name == "logistic":
@@ -647,6 +653,7 @@ class RenewalSimulator:
                 )
             ),
             case_beam_quantiles=case_beam_quantiles,
+            sampling=sampling_cfg,
             rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),
         )
 
