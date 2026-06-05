@@ -8,6 +8,10 @@ Includes:
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+import yaml
 import numpy as np
 import pandas as pd
 import scipy.stats
@@ -113,3 +117,9 @@ def parse_timestamp(
         f"Unsupported timestamp type: {type(value).__name__!r}. "
         "Expected str (ISO date), int (YYYYWW), or float (days offset)."
     )
+
+
+def load_yaml_dict(path: str | Path) -> dict[str, Any]:
+    """Load a YAML file and return its contents as a dict."""
+    with open(path) as fp:
+        return yaml.safe_load(fp)

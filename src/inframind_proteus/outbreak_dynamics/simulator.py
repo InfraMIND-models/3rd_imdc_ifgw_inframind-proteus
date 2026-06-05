@@ -29,6 +29,7 @@ import pandas as pd
 from .generation_time import BaseGT
 from .rt_models import BaseRT
 from .scoring import nbinom_ppf_cf, wis_score_vectorized
+from .utils import parse_timestamp
 
 
 # ---------------------------------------------------------------------------
@@ -115,8 +116,8 @@ class SimulationConfig:
     gt_max: int = 49  # days
     temporal: TemporalConfig = field(
         default_factory=lambda: TemporalConfig(
-            zero_date=pd.Timestamp("2023-10-02"),
-            sim_start=pd.Timestamp("2023-10-02"),
+            zero_date=pd.Timestamp("2023-10-01"),
+            sim_start=pd.Timestamp("2023-10-01"),
         )
     )
     location: LocationConfig = field(
@@ -530,6 +531,95 @@ class RenewalSimulator:
         -------
         RenewalSimulator
         """
-        # TODO: implement — build SimulationConfig (and children) from dict,
-        #       then call __init__
-        raise NotImplementedError
+        defaults = SimulationConfig()
+
+        sim_cfg = config_dict.get("simulation", {}) or {}
+        temporal_cfg = config_dict.get("temporal", {}) or {}
+        location_cfg = config_dict.get("location", {}) or {}
+        obs_params = (config_dict.get("observation_model", {}) or {}).get("params", {}) or {}
+        scoring_cfg = config_dict.get("scoring", {}) or {}
+
+        mode = sim_cfg.get("mode", defaults.mode)
+        if mode not in ("calibration", "projection"):
+            raise ValueError(
+                f"simulation.mode must be 'calibration' or 'projection'; got {mode!r}"
+            )
+
+        def _to_timestamp(
+            value: str | int | float | pd.Timestamp,
+            zero_date: pd.Timestamp | None = None,
+        ) -> pd.Timestamp:
+            if isinstance(value, pd.Timestamp):
+                return value
+            return parse_timestamp(value, zero_date=zero_date)
+
+        zero_date = _to_timestamp(
+            temporal_cfg.get("zero_date", defaults.temporal.zero_date)
+        )
+        sim_start = _to_timestamp(
+            temporal_cfg.get("sim_start", defaults.temporal.sim_start),
+            zero_date=zero_date,
+        )
+
+        calibration_start_raw = temporal_cfg.get("calibration_start")
+        calibration_end_raw = temporal_cfg.get("calibration_end")
+        calibration_start = (
+            _to_timestamp(calibration_start_raw, zero_date=zero_date)
+            if calibration_start_raw is not None
+            else defaults.temporal.calibration_start
+        )
+        calibration_end = (
+            _to_timestamp(calibration_end_raw, zero_date=zero_date)
+            if calibration_end_raw is not None
+            else defaults.temporal.calibration_end
+        )
+
+        case_beam_quantiles = [
+            float(q)
+            for q in scoring_cfg.get(
+                "case_beam_quantiles",
+                sim_cfg.get("case_beam_quantiles", defaults.case_beam_quantiles),
+            )
+        ]
+
+        config = SimulationConfig(
+            mode=mode,
+            num_simulations=int(sim_cfg.get("num_simulations", defaults.num_simulations)),
+            num_time_steps=int(sim_cfg.get("num_time_steps", defaults.num_time_steps)),
+            gt_max=int(sim_cfg.get("gt_max", defaults.gt_max)),
+            temporal=TemporalConfig(
+                zero_date=zero_date,
+                sim_start=sim_start,
+                step_dt=int(temporal_cfg.get("step_dt", defaults.temporal.step_dt)),
+                calibration_start=calibration_start,
+                calibration_end=calibration_end,
+            ),
+            location=LocationConfig(
+                location_id_variable=location_cfg.get(
+                    "location_id_variable", defaults.location.location_id_variable
+                ),
+                location_id=location_cfg.get("location_id", defaults.location.location_id),
+            ),
+            notif_nb_overdispersion=float(
+                obs_params.get(
+                    "notif_nb_overdispersion",
+                    sim_cfg.get(
+                        "notif_nb_overdispersion",
+                        defaults.notif_nb_overdispersion,
+                    ),
+                )
+            ),
+            notif_scaling_factor=float(
+                obs_params.get(
+                    "notif_scaling_factor",
+                    sim_cfg.get(
+                        "notif_scaling_factor",
+                        defaults.notif_scaling_factor,
+                    ),
+                )
+            ),
+            case_beam_quantiles=case_beam_quantiles,
+            rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),
+        )
+
+        return cls(rt_model=rt_model, gt_model=gt_model, config=config)

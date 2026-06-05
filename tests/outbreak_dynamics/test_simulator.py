@@ -615,3 +615,96 @@ class TestRun:
 
         # The infection arrays should be identical (same effective R(t))
         assert_allclose(out_a.infec_df.values, out_b.infec_df.values, rtol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# TestFactory
+# ---------------------------------------------------------------------------
+
+class TestFactory:
+    """Tests for RenewalSimulator.from_config_dict()."""
+
+    def test_from_config_dict_builds_nested_dataclasses(self):
+        config_dict = {
+            "simulation": {
+                "mode": "calibration",
+                "num_simulations": 7,
+                "num_time_steps": 12,
+                "gt_max": 35,
+                "rng_seed": 123,
+            },
+            "temporal": {
+                "zero_date": "2024-01-01",
+                "sim_start": 14.0,          # float days since zero_date
+                "calibration_start": 7.0,
+                "calibration_end": "2024-02-05",
+                "step_dt": 7,
+            },
+            "location": {
+                "location_id_variable": "uf",
+                "location_id": "DF",
+            },
+            "observation_model": {
+                "params": {
+                    "notif_nb_overdispersion": 6.5,
+                    "notif_scaling_factor": 2.0,
+                }
+            },
+            "scoring": {
+                "case_beam_quantiles": [0.1, 0.5, 0.9],
+            },
+        }
+
+        sim = RenewalSimulator.from_config_dict(
+            config_dict=config_dict,
+            rt_model=LogisticRT(),
+            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+        )
+
+        cfg = sim.config
+        assert cfg.mode == "calibration"
+        assert cfg.num_simulations == 7
+        assert cfg.num_time_steps == 12
+        assert cfg.gt_max == 35
+        assert cfg.rng_seed == 123
+        assert cfg.temporal.zero_date == pd.Timestamp("2024-01-01")
+        assert cfg.temporal.sim_start == pd.Timestamp("2024-01-15")
+        assert cfg.temporal.calibration_start == pd.Timestamp("2024-01-08")
+        assert cfg.temporal.calibration_end == pd.Timestamp("2024-02-05")
+        assert cfg.temporal.step_dt == 7
+        assert cfg.location.location_id_variable == "uf"
+        assert cfg.location.location_id == "DF"
+        assert cfg.notif_nb_overdispersion == pytest.approx(6.5)
+        assert cfg.notif_scaling_factor == pytest.approx(2.0)
+        assert cfg.case_beam_quantiles == [0.1, 0.5, 0.9]
+
+    def test_from_config_dict_uses_defaults_when_sections_missing(self):
+        sim = RenewalSimulator.from_config_dict(
+            config_dict={},
+            rt_model=LogisticRT(),
+            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+        )
+        defaults = SimulationConfig()
+        cfg = sim.config
+
+        assert cfg.mode == defaults.mode
+        assert cfg.num_simulations == defaults.num_simulations
+        assert cfg.num_time_steps == defaults.num_time_steps
+        assert cfg.gt_max == defaults.gt_max
+        assert cfg.temporal.zero_date == defaults.temporal.zero_date
+        assert cfg.temporal.sim_start == defaults.temporal.sim_start
+        assert cfg.temporal.step_dt == defaults.temporal.step_dt
+        assert cfg.location.location_id_variable == defaults.location.location_id_variable
+        assert cfg.location.location_id == defaults.location.location_id
+        assert cfg.notif_nb_overdispersion == defaults.notif_nb_overdispersion
+        assert cfg.notif_scaling_factor == defaults.notif_scaling_factor
+        assert cfg.case_beam_quantiles == defaults.case_beam_quantiles
+        assert cfg.rng_seed == defaults.rng_seed
+
+    def test_from_config_dict_invalid_mode_raises(self):
+        with pytest.raises(ValueError, match="simulation.mode"):
+            RenewalSimulator.from_config_dict(
+                config_dict={"simulation": {"mode": "invalid"}},
+                rt_model=LogisticRT(),
+                gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+            )

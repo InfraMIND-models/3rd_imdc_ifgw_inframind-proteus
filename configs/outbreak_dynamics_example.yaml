@@ -16,8 +16,8 @@ simulation:
 temporal:
   # Timestamps accept: ISO date ("YYYY-MM-DD"), float days, or YYYYWW integer.
   zero_date: "2023-10-02"
-  sim_start: "2023-10-02"
-  calibration_start: "2023-10-02"    # calibration mode only
+  sim_start: "2023-10-01"
+  calibration_start: "2023-10-01"    # calibration mode only
   calibration_end:   "2024-04-01"    # calibration mode only
   step_dt: 7                         # days per step (7 = weekly)
 
