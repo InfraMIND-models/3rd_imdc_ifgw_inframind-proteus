@@ -74,8 +74,8 @@ scoring:
 
 # ----------------------------------------------------------------------------
 output:
-  output_dir: "outputs/outbreak_dynamics"
-  save_infec_trajectories: true
+  output_dir: "outputs/outbreak_dynamics_example"
+  save_infec_trajectories: false
   save_cases_trajectories: true
   save_case_beam: true
   save_scores: true          # written only in calibration mode

@@ -139,7 +139,7 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
 def build_calibration_params_df(
     num_simulations: int,
     sampling_config: SamplingConfig,
-    required_param_names: list[str],
+    required_param_names: list[str] | None = None,
     rng_seed: int | None = None,
 ) -> pd.DataFrame:
     """Build a calibration ``params_df`` from fixed and sampled parameters.
@@ -149,6 +149,8 @@ def build_calibration_params_df(
     - Apply LHS sampling for keys listed in ``sampling.param_ranges``.
     - On name collision, sampled values override fixed values.
     """
+    required_param_names = required_param_names or []
+
     # n = int(sampling_config.num_simulations)
     n = num_simulations
     if n <= 0:
