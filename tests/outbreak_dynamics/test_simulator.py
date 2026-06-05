@@ -626,6 +626,16 @@ class TestFactory:
 
     def test_from_config_dict_builds_nested_dataclasses(self):
         config_dict = {
+            "reproduction_number": {
+                "model": "logistic",
+            },
+            "generation_time": {
+                "model": "constant_gamma",
+                "params": {
+                    "shape": 6.0,
+                    "scale": 1.5,
+                },
+            },
             "simulation": {
                 "mode": "calibration",
                 "num_simulations": 7,
@@ -655,13 +665,13 @@ class TestFactory:
             },
         }
 
-        sim = RenewalSimulator.from_config_dict(
-            config_dict=config_dict,
-            rt_model=LogisticRT(),
-            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
-        )
+        sim = RenewalSimulator.from_config_dict(config_dict=config_dict)
 
         cfg = sim.config
+        assert isinstance(sim.rt_model, LogisticRT)
+        assert isinstance(sim.gt_model, ConstantGammaGT)
+        assert sim.gt_model.shape == pytest.approx(6.0)
+        assert sim.gt_model.scale == pytest.approx(1.5)
         assert cfg.mode == "calibration"
         assert cfg.num_simulations == 7
         assert cfg.num_time_steps == 12
@@ -679,14 +689,14 @@ class TestFactory:
         assert cfg.case_beam_quantiles == [0.1, 0.5, 0.9]
 
     def test_from_config_dict_uses_defaults_when_sections_missing(self):
-        sim = RenewalSimulator.from_config_dict(
-            config_dict={},
-            rt_model=LogisticRT(),
-            gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
-        )
+        sim = RenewalSimulator.from_config_dict(config_dict={})
         defaults = SimulationConfig()
         cfg = sim.config
 
+        assert isinstance(sim.rt_model, LogisticRT)
+        assert isinstance(sim.gt_model, ConstantGammaGT)
+        assert sim.gt_model.shape == pytest.approx(10.0)
+        assert sim.gt_model.scale == pytest.approx(1.8)
         assert cfg.mode == defaults.mode
         assert cfg.num_simulations == defaults.num_simulations
         assert cfg.num_time_steps == defaults.num_time_steps
@@ -705,6 +715,16 @@ class TestFactory:
         with pytest.raises(ValueError, match="simulation.mode"):
             RenewalSimulator.from_config_dict(
                 config_dict={"simulation": {"mode": "invalid"}},
-                rt_model=LogisticRT(),
-                gt_model=ConstantGammaGT(shape=5.0, scale=2.0),
+            )
+
+    def test_from_config_dict_invalid_rt_model_raises(self):
+        with pytest.raises(ValueError, match="Unsupported reproduction_number.model"):
+            RenewalSimulator.from_config_dict(
+                config_dict={"reproduction_number": {"model": "unknown_rt"}},
+            )
+
+    def test_from_config_dict_invalid_gt_model_raises(self):
+        with pytest.raises(ValueError, match="Unsupported generation_time.model"):
+            RenewalSimulator.from_config_dict(
+                config_dict={"generation_time": {"model": "unknown_gt"}},
             )

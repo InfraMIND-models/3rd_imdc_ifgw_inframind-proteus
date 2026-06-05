@@ -26,8 +26,8 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from .generation_time import BaseGT
-from .rt_models import BaseRT
+from .generation_time import BaseGT, ConstantGammaGT
+from .rt_models import BaseRT, LogisticRT
 from .scoring import nbinom_ppf_cf, wis_score_vectorized
 from .utils import parse_timestamp
 
@@ -258,12 +258,14 @@ class RenewalSimulator:
                 "set when mode='calibration'"
             )
 
-        # Fill config-default observation params when not in params_df
         _params = params_df.copy()
-        if "notif_nb_overdispersion" not in _params.columns:
-            _params["notif_nb_overdispersion"] = cfg.notif_nb_overdispersion
-        if "notif_scaling_factor" not in _params.columns:
-            _params["notif_scaling_factor"] = cfg.notif_scaling_factor
+
+        # Fill config-default observation params when not in params_df
+        # NOTE: Disabled since we want to enforce presence of these parameters.
+        # if "notif_nb_overdispersion" not in _params.columns:
+        #     _params["notif_nb_overdispersion"] = cfg.notif_nb_overdispersion
+        # if "notif_scaling_factor" not in _params.columns:
+        #     _params["notif_scaling_factor"] = cfg.notif_scaling_factor
 
         self.rt_model.validate_params(_params)
 
@@ -477,6 +479,8 @@ class RenewalSimulator:
             MultiIndex ``(quantile, i_simulation)``, integer columns
             ``0..num_time_steps-1`` (renamed to timestamps by the caller).
         """
+        # TODO: Validate parameters for this function
+
         overdisp = params_df["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
         scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
 
@@ -513,8 +517,6 @@ class RenewalSimulator:
     def from_config_dict(
         cls,
         config_dict: dict,
-        rt_model: BaseRT,
-        gt_model: BaseGT,
     ) -> "RenewalSimulator":
         """Construct a simulator from a raw config dictionary (e.g. from YAML).
 
@@ -522,10 +524,6 @@ class RenewalSimulator:
         ----------
         config_dict:
             Parsed YAML dictionary.
-        rt_model:
-            R(t) model instance.
-        gt_model:
-            GT model instance.
 
         Returns
         -------
@@ -538,6 +536,30 @@ class RenewalSimulator:
         location_cfg = config_dict.get("location", {}) or {}
         obs_params = (config_dict.get("observation_model", {}) or {}).get("params", {}) or {}
         scoring_cfg = config_dict.get("scoring", {}) or {}
+        rt_cfg = config_dict.get("reproduction_number", {}) or {}
+        gt_cfg = config_dict.get("generation_time", {}) or {}
+
+        rt_model_name = str(rt_cfg.get("model", "logistic")).strip().lower()
+        if rt_model_name == "logistic":
+            rt_model = LogisticRT()
+        else:
+            raise ValueError(
+                "Unsupported reproduction_number.model: "
+                f"{rt_cfg.get('model')!r}. Supported models: ['logistic']"
+            )
+
+        gt_model_name = str(gt_cfg.get("model", "constant_gamma")).strip().lower()
+        gt_params = gt_cfg.get("params", {}) or {}
+        if gt_model_name == "constant_gamma":
+            gt_model = ConstantGammaGT(
+                shape=float(gt_params.get("shape", 10.0)),
+                scale=float(gt_params.get("scale", 1.8)),
+            )
+        else:
+            raise ValueError(
+                "Unsupported generation_time.model: "
+                f"{gt_cfg.get('model')!r}. Supported models: ['constant_gamma']"
+            )
 
         mode = sim_cfg.get("mode", defaults.mode)
         if mode not in ("calibration", "projection"):
