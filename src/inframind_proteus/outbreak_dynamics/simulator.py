@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numba as nb
 import numpy as np
 import pandas as pd
 
@@ -461,18 +462,14 @@ class RenewalSimulator:
         where the sum runs over ``s = 1..gt_max_steps`` (the look-back
         window), and ``w_i`` is the GT PMF row for step ``i``.
         """
-        for i_sim_step in range(num_time_steps):
-            i_full = gt_max_steps + i_sim_step
-            # Look-back window: columns [i_sim_step, i_full)
-            # Shape of each slice: (num_simulations, gt_max_steps)
-            # gt_pmf[i_sim_step] broadcasts as (gt_max_steps,)
-            infec_vec[:, i_full] = np.sum(
-                rt_vec[:, i_sim_step:i_full]
-                * infec_vec[:, i_sim_step:i_full]
-                * gt_pmf[i_sim_step],
-                axis=1,
-            )
-        return infec_vec
+        # Delegate to external function that can be numba-compiled
+        return _run_renewal_loop_numba(
+            infec_vec=infec_vec,
+            rt_vec=rt_vec,
+            gt_pmf=gt_pmf,
+            gt_max_steps=gt_max_steps,
+            num_time_steps=num_time_steps,
+        )
 
     def _apply_observation_model(
         self,
@@ -679,3 +676,75 @@ class RenewalSimulator:
         )
 
         return cls(rt_model=rt_model, gt_model=gt_model, config=config)
+
+
+_nb_readonly_arr = nb.types.Array(nb.types.float64, 2, 'A', readonly=True)
+@nb.njit(
+    nb.float64[:,:](
+        nb.float64[:,:],
+        nb.float64[:,:],
+        _nb_readonly_arr,
+        nb.int64,
+        nb.int64,
+    ),
+)
+def _run_renewal_loop_numba(
+    infec_vec: np.ndarray,
+    rt_vec: np.ndarray,
+    gt_pmf: np.ndarray,
+    gt_max_steps: int,
+    num_time_steps: int,
+) -> np.ndarray:
+    """Core renewal equation time loop (numba-compatible structure).
+
+    Advances ``infec_vec`` in-place through ``num_time_steps`` steps.
+
+    Parameters
+    ----------
+    infec_vec:
+        Full infection array of shape
+        ``(num_simulations, gt_max_steps + num_time_steps)``.
+        The first ``gt_max_steps`` columns are pre-filled (warm-up).
+    rt_vec:
+        R(t) array of the same shape as ``infec_vec``.
+    gt_pmf:
+        Generation time PMF of shape ``(num_time_steps, gt_max_steps)``.
+        Axis 1 follows the *reversed-lag* convention: index 0 is the
+        largest lag (oldest), index ``-1`` is lag 1 (most recent step).
+        This ordering aligns directly with the look-back window slices
+        so no further reversal is needed inside the loop.
+    gt_max_steps:
+        Size of the warm-up / look-back window.
+    num_time_steps:
+        Number of steps to advance.
+
+    Returns
+    -------
+    np.ndarray
+        Updated ``infec_vec`` (modified in-place and returned).
+
+    Notes
+    -----
+    This method intentionally avoids pandas objects and Python-level
+    data structures so that a future ``@numba.njit`` decoration requires
+    only minimal changes.
+
+    Renewal equation at simulation step ``i`` (0-based)::
+
+        I(t_i) = Σ_s  R(t_{i-s}) · I(t_{i-s}) · w_i(s)
+
+    where the sum runs over ``s = 1..gt_max_steps`` (the look-back
+    window), and ``w_i`` is the GT PMF row for step ``i``.
+    """
+    for i_sim_step in range(num_time_steps):
+        i_full = gt_max_steps + i_sim_step
+        # Look-back window: columns [i_sim_step, i_full)
+        # Shape of each slice: (num_simulations, gt_max_steps)
+        # gt_pmf[i_sim_step] broadcasts as (gt_max_steps,)
+        infec_vec[:, i_full] = np.sum(
+            rt_vec[:, i_sim_step:i_full]
+            * infec_vec[:, i_sim_step:i_full]
+            * gt_pmf[i_sim_step],
+            axis=1,
+        )
+    return infec_vec
