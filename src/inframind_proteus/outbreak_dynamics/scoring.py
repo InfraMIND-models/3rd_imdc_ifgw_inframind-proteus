@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import scipy.stats
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +231,42 @@ def smape_vectorized(
     with np.errstate(invalid="ignore"):
         ratio = np.where(denom == 0, 0.0, numerator / denom)
     return np.mean(ratio, axis=1)
+
+
+def nb_loglikelihood_vectorized(
+    simulations_df: pd.DataFrame,
+    observations_sr: pd.Series,
+    overdisp: np.ndarray,
+) -> np.ndarray:
+    """Negative Binomial log-likelihood for individual trajectories.
+
+    Parameters
+    ----------
+    simulations_df:
+        DataFrame of shape ``(num_simulations, num_time_steps)``.)
+    observations_sr:
+        Observed counts indexed by time step.
+    overdisp:
+        Array of shape ``(num_simulations,)`` with the negative binomial
+        overdispersion ("n" parameter) to consider for each simulation.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(num_simulations,)`` with the total log-likelihood of each simulation
+        trajectory under a Negative Binomial model with mean given by the
+        simulation and overdispersion given by `overdisp`.
+    """
+    obs = observations_sr.reindex(simulations_df.columns).values  # (num_time_steps,)
+    pred = simulations_df.values            # (num_simulations, num_time_steps)
+    n = overdisp[:, np.newaxis]             # (num_simulations, 1)
+
+    with np.errstate(invalid="ignore"):
+        ll_array = scipy.stats.nbinom.logpmf(
+            k=obs[np.newaxis, :],
+            n=n,
+            p=n / (pred + n)
+        )
+        # Shape: (num_simulations, num_time_steps)
+
+    return np.sum(ll_array, axis=1)  # Sum over time steps

@@ -36,7 +36,7 @@ from .initial_infections import (
 )
 from .rt_models import BaseRT, LogisticRT
 from .sampling import SamplingConfig, parse_calibration_sampling_config
-from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized
+from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized
 from .utils import parse_timestamp
 
 
@@ -384,7 +384,9 @@ class RenewalSimulator:
         wis_array = None
         if cfg.mode == "calibration":
             observations_sr: pd.Series
-            scoring = self.score_simulations(cfg, case_beam_df, observations_sr)
+            scoring = self.score_simulations(
+                cfg, case_beam_df, observations_sr, params_df
+            )
 
         else:
             scoring = None
@@ -537,7 +539,8 @@ class RenewalSimulator:
     def score_simulations(
             cfg: SimulationConfig,
             case_beam_df: DataFrame,
-            observations_sr: Series
+            observations_sr: Series,
+            params_df: pd.DataFrame,
     ) -> SimulationScoring:
         """Score simulated trajectories against observations via WIS.
 
@@ -616,6 +619,13 @@ class RenewalSimulator:
             observations_sr=observations_sr,
         )
         summary_df["rmse"] = rmse_array
+
+        # Negative-binomial loglikelihood
+        summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
+            simulations_df=simulations_median_df,
+            observations_sr=observations_sr,
+            overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
+        )
 
         scoring = SimulationScoring(
             wis_array=wis_array,
