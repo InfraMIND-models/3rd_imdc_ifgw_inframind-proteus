@@ -77,7 +77,7 @@ def _dvc_remote_user(username: str) -> list[str]:
 STEPS: list[Step] = [
     Step(
         name="Sync Python environment  (uv sync --extra dev)",
-        cmd=["uv", "sync", "--extra", "dev"],
+        cmd=["uv", "sync", "--extra", "dev", "--group", "dev"],
     ),
     Step(
         name="Enable nbdime git integration",
