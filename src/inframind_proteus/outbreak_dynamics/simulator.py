@@ -26,6 +26,7 @@ from typing import Literal
 import numba as nb
 import numpy as np
 import pandas as pd
+from pandas import DataFrame, Series
 
 from .generation_time import BaseGT, ConstantGammaGT
 from .initial_infections import (
@@ -35,7 +36,7 @@ from .initial_infections import (
 )
 from .rt_models import BaseRT, LogisticRT
 from .sampling import SamplingConfig, parse_calibration_sampling_config
-from .scoring import nbinom_ppf_cf, wis_score_vectorized
+from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized
 from .utils import parse_timestamp
 
 
@@ -164,8 +165,14 @@ class SimulationScoring:
         projection mode.  Shape ``(num_simulations, n_cal)`` where ``n_cal``
         is the number of observation timestamps that fall within
         ``[calibration_start, calibration_end]``.
+    summary:
+        Summary scores for all simulations, with one scalar for each score
+        and for each simulation.
+        Data frame shape is ``(num_simulations, num_scores)``,
+        where ``num_scores`` is the number of calculated scores.
     """
     wis_array: np.ndarray
+    summary: pd.DataFrame
 
 
 @dataclass
@@ -372,40 +379,12 @@ class RenewalSimulator:
         case_beam_df.columns.name = "t"
 
         # ------------------------------------------------------------------
-        # 8. WIS scoring (calibration mode only)
+        # 8. Scoring (calibration mode only)
         # ------------------------------------------------------------------
         wis_array = None
         if cfg.mode == "calibration":
-            cal_start = cfg.temporal.calibration_start
-            cal_end   = cfg.temporal.calibration_end
-
-            # Slice observations to the declared calibration window
-            obs_cal = observations_sr.loc[
-                (observations_sr.index >= cal_start)
-                & (observations_sr.index <= cal_end)
-            ]
-            if obs_cal.empty:
-                raise ValueError(
-                    f"No observation data within the calibration window "
-                    f"[{cal_start.date()}, {cal_end.date()}]"
-                )
-
-            # Every calibration timestamp must align exactly with a simulation step
-            missing = obs_cal.index.difference(case_beam_df.columns)
-            if not missing.empty:
-                raise ValueError(
-                    f"{len(missing)} calibration timestamp(s) are absent from the "
-                    f"simulation period. Missing: {missing[:5].tolist()}"
-                )
-
-            wis_array = wis_score_vectorized(
-                simulations_df=case_beam_df[obs_cal.index],
-                observations_sr=obs_cal,
-            )
-
-            scoring = SimulationScoring(
-                wis_array=wis_array,
-            )
+            observations_sr: pd.Series
+            scoring = self.score_simulations(cfg, case_beam_df, observations_sr)
 
         else:
             scoring = None
@@ -426,10 +405,6 @@ class RenewalSimulator:
             step_dt=self._step_dt,
             initial_config=self.config.initial_infections,
         )
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _run_renewal_loop(
@@ -488,6 +463,10 @@ class RenewalSimulator:
             gt_max_steps=gt_max_steps,
             num_time_steps=num_time_steps,
         )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _apply_observation_model(
         self,
@@ -553,6 +532,97 @@ class RenewalSimulator:
         )
 
         return cases_vec, case_beam_df
+
+    @staticmethod
+    def score_simulations(
+            cfg: SimulationConfig,
+            case_beam_df: DataFrame,
+            observations_sr: Series
+    ) -> SimulationScoring:
+        """Score simulated trajectories against observations via WIS.
+
+        Computes per-simulation score metrics over the
+        declared calibration window using the deterministic case beam
+        quantiles produced by the observation model.
+
+        Parameters
+        ----------
+        case_beam_df:
+            Deterministic case prediction beam with MultiIndex
+            ``(quantile, i_simulation)`` and timestamp columns.
+        cfg:
+            Simulation configuration. Uses
+            ``cfg.temporal.calibration_start`` and
+            ``cfg.temporal.calibration_end`` to define the scoring window.
+        observations_sr:
+            Observed case counts indexed by timestamp.
+
+        Returns
+        -------
+        SimulationScoring
+            Scoring container with ``wis_array`` of shape
+            ``(num_simulations, n_cal)``, where ``n_cal`` is the number of
+            observation timestamps inside the calibration window.
+
+        Raises
+        ------
+        ValueError
+            If no observations fall within the calibration window.
+        ValueError
+            If any calibration timestamp in ``observations_sr`` is absent
+            from the simulation timestamps in ``case_beam_df``.
+        """
+        cal_start = cfg.temporal.calibration_start
+        cal_end = cfg.temporal.calibration_end
+
+        # Slice observations to the declared calibration window
+        obs_cal = observations_sr.loc[
+            (observations_sr.index >= cal_start)
+            & (observations_sr.index <= cal_end)
+            ]
+        if obs_cal.empty:
+            raise ValueError(
+                f"No observation data within the calibration window "
+                f"[{cal_start.date()}, {cal_end.date()}]"
+            )
+
+        # Every calibration timestamp must align exactly with a simulation step
+        missing = obs_cal.index.difference(case_beam_df.columns)
+        if not missing.empty:
+            raise ValueError(
+                f"{len(missing)} calibration timestamp(s) are absent from the "
+                f"simulation period. Missing: {missing[:5].tolist()}"
+            )
+
+        simulations_df = case_beam_df[obs_cal.index]
+        simulations_median_df = simulations_df.xs(0.5, level="quantile")
+        summary_df = pd.DataFrame(
+            {}, index=simulations_df.index.get_level_values("i_simulation").unique()
+        )
+        # ^ Shape: summary_df[i_simulation, score_name] = summary score scalar value
+        # Expects that `simulations_df` is sorted by `i_simulation`.
+        # Warning: Resulting WIS values may be randomized if this is not satisfied.
+
+        # Weighted Interval Scores (WIS)
+        wis_array = wis_score_vectorized(
+            simulations_df=simulations_df,
+            observations_sr=obs_cal,
+        )
+        summary_df["wis"] = wis_array.sum(axis=1)
+
+        # Root Mean Squared Error - individual components
+        rmse_array = rmse_vectorized(
+            simulations_df=simulations_median_df,
+            observations_sr=observations_sr,
+        )
+        summary_df["rmse"] = rmse_array
+
+        scoring = SimulationScoring(
+            wis_array=wis_array,
+            summary=summary_df,
+        )
+
+        return scoring
 
     # ------------------------------------------------------------------
     # Factory

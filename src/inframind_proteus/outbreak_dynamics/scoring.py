@@ -107,6 +107,8 @@ def wis_score_vectorized(
     Scores deterministic case beam quantiles (prediction intervals) against
     observed case counts.
 
+    Precondition: All simulations must have the same sets of quantiles in `simulations_df`.
+
     Parameters
     ----------
     simulations_df:
