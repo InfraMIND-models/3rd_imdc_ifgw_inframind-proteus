@@ -408,13 +408,13 @@ class TestRun:
 
     # --- Projection mode ---
 
-    def test_projection_mode_wis_is_none(self, sim, params, initial_infec):
+    def test_projection_mode_scoring_is_none(self, sim, params, initial_infec):
         out = sim.run(params, initial_infec)
-        assert out.wis_array is None
+        assert out.scoring is None
 
     # --- Calibration mode ---
 
-    def test_calibration_mode_wis_not_none(self):
+    def test_calibration_mode_scoring_not_none(self):
         # sim: 2024-01-01, 2024-01-08, 2024-01-15, 2024-01-22 (step_dt=7, 4 steps)
         # calibration window = full simulation range
         cfg = make_config(
@@ -438,7 +438,7 @@ class TestRun:
         )
         obs = pd.Series(np.arange(1, cfg.num_time_steps + 1, dtype=float), index=timestamps)
         out = sim_cal.run(params, initial, observations_sr=obs)
-        assert out.wis_array is not None
+        assert out.scoring is not None
 
     def test_calibration_mode_wis_shape(self):
         # sim: 6 weekly steps from 2024-01-01
@@ -467,7 +467,7 @@ class TestRun:
         obs = pd.Series(np.ones(num_steps, dtype=float), index=all_timestamps)
         out = sim_cal.run(params, initial, observations_sr=obs)
         # Only the 3 timestamps inside [calibration_start, calibration_end] are scored
-        assert out.wis_array.shape == (num_sim, 3)
+        assert out.scoring.wis_array.shape == (num_sim, 3)
 
     # --- Validation errors ---
 

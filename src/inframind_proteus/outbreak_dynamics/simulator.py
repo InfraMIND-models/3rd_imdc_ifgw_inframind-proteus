@@ -155,6 +155,20 @@ class SimulationConfig:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class SimulationScoring:
+    """
+    Attributes
+    ----------
+    wis_array:
+        Per-simulation WIS scores over the calibration window.  ``None`` in
+        projection mode.  Shape ``(num_simulations, n_cal)`` where ``n_cal``
+        is the number of observation timestamps that fall within
+        ``[calibration_start, calibration_end]``.
+    """
+    wis_array: np.ndarray
+
+
+@dataclass
 class SimulationOutput:
     """Outputs from a simulation run.
 
@@ -169,11 +183,8 @@ class SimulationOutput:
     case_beam_df:
         Deterministic quantile case beam.
         MultiIndex ``(quantile, i_simulation)``, same time-step columns.
-    wis_array:
-        Per-simulation WIS scores over the calibration window.  ``None`` in
-        projection mode.  Shape ``(num_simulations, n_cal)`` where ``n_cal``
-        is the number of observation timestamps that fall within
-        ``[calibration_start, calibration_end]``.
+    scoring:
+        Scoring results for calibration mode; ``None`` in projection mode.
     config:
         The :class:`SimulationConfig` used to produce these outputs.
     """
@@ -181,7 +192,7 @@ class SimulationOutput:
     infec_df: pd.DataFrame
     cases_df: pd.DataFrame
     case_beam_df: pd.DataFrame
-    wis_array: np.ndarray | None
+    scoring: SimulationScoring | None
     config: SimulationConfig
 
 
@@ -392,11 +403,18 @@ class RenewalSimulator:
                 observations_sr=obs_cal,
             )
 
+            scoring = SimulationScoring(
+                wis_array=wis_array,
+            )
+
+        else:
+            scoring = None
+
         return SimulationOutput(
             infec_df=infec_df,
             cases_df=cases_df,
             case_beam_df=case_beam_df,
-            wis_array=wis_array,
+            scoring=scoring,
             config=cfg,
         )
 

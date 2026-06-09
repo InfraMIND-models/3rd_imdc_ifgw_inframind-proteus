@@ -174,7 +174,7 @@ def wis_score_vectorized(
 
 
 # ---------------------------------------------------------------------------
-# Fallback scoring: individual trajectory metrics
+# Individual trajectory metrics
 # ---------------------------------------------------------------------------
 
 def rmse_vectorized(
