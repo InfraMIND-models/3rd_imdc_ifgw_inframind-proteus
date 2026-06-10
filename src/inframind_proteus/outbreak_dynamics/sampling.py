@@ -25,6 +25,9 @@ class SamplingConfig:
     param_ranges:
         Parameter ranges to be sampled, mapping parameter name to
         ``[lower_bound, upper_bound]``.
+    param_scales:
+        Mapping from parameter name to scale type. Supported values:
+        ``"linear"`` (default) or ``"log"`` (logarithmic).
     rt_params:
         Fixed reproduction-number parameters (from
         ``reproduction_number.params``).
@@ -36,13 +39,78 @@ class SamplingConfig:
     # num_simulations: int# = 1000
     method: str = "lhs"
     param_ranges: dict[str, list[float]] = field(default_factory=dict)
+    param_scales: dict[str, str] = field(default_factory=dict)
     rt_params: dict[str, float] = field(default_factory=dict)
     observation_params: dict[str, float] = field(default_factory=dict)
+
+
+def _get_scaled_bounds(
+    param_ranges: dict[str, list[float]],
+    param_scales: dict[str, str],
+    param_names: list[str],
+):
+    """ Get lower and upper bounds for sampling, applying transformation for
+    non-linear scale parameters.
+
+    For log-scale parameters, the bounds are transformed to log-space for sampling.
+
+    Parameters
+    ----------
+    param_ranges:
+        Mapping from parameter name to [lower_bound, upper_bound].
+    param_scales:
+        Mapping from parameter name to scale type. Supported values: "linear" or "log".
+    param_names:
+        List of parameter names to process (order matters for output).
+    """
+    l_bounds = []
+    u_bounds = []
+
+    for param_name in param_names:
+        bounds = param_ranges[param_name]
+        scale = param_scales.get(param_name, "linear").lower()
+
+        if scale == "log":
+            if bounds[0] <= 0 or bounds[1] <= 0:
+                raise ValueError(
+                    f"Log-scale parameter {param_name!r} must have positive bounds, "
+                    f"got {bounds}"
+                )
+            l_bounds.append(np.log(bounds[0]))
+            u_bounds.append(np.log(bounds[1]))
+        elif scale == "linear":
+            l_bounds.append(bounds[0])
+            u_bounds.append(bounds[1])
+        else:
+            raise ValueError(
+                f"Unsupported scale for parameter {param_name!r}: {scale!r}. "
+                "Supported scales: 'linear', 'log'"
+            )
+
+    return l_bounds, u_bounds
+
+
+def _transform_sampled_parameters(
+        lhs_scaled: np.ndarray,
+        param_scales: dict[str, str],
+        param_names: list[str],
+):
+    """
+    Apply non-linear scaling transformations to the sampled parameters in-place.
+    """
+    for i, param_name in enumerate(param_names):
+        scale = param_scales.get(param_name, "linear").lower()
+
+        # Apply exponential transformation for log-scale parameters
+        if scale == "log":
+            lhs_scaled[:, i] = np.exp(lhs_scaled[:, i])
+
 
 def sample_lhs(
     param_ranges: dict[str, list[float]],
     num_simulations: int,
     rng: Generator,
+    param_scales: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """Draw a Latin Hypercube sample scaled to the given parameter ranges.
 
@@ -54,6 +122,12 @@ def sample_lhs(
         Number of samples (rows in the output).
     rng:
         NumPy random generator instance.
+    param_scales:
+        Mapping from parameter name to scale type. Supported values:
+        ``"linear"`` (default) or ``"log"`` (logarithmic).
+        For log-scale parameters, the bounds are interpreted as linear values,
+        but sampling occurs in log-space: samples are drawn uniformly from
+        ``[log(lower), log(upper)]`` and then exponentiated.
 
     Returns
     -------
@@ -61,14 +135,23 @@ def sample_lhs(
         Shape ``(num_simulations, len(param_ranges))``, columns are
         parameter names.
     """
+    param_scales = param_scales or {}
+    param_names = list(param_ranges.keys())
+
+    l_bounds, u_bounds = _get_scaled_bounds(
+        param_ranges=param_ranges,
+        param_scales=param_scales,
+        param_names=param_names,
+    )
+
     lhs_sampler = scipy.stats.qmc.LatinHypercube(d=len(param_ranges), rng=rng)
     lhs_samples = lhs_sampler.random(n=num_simulations)
 
-    l_bounds = [v[0] for v in param_ranges.values()]
-    u_bounds = [v[1] for v in param_ranges.values()]
+    # Scale to bounds (in potentially transformed space)
     lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
+    _transform_sampled_parameters(lhs_scaled, param_scales, param_names)
 
-    return pd.DataFrame(lhs_scaled, columns=list(param_ranges.keys()))
+    return pd.DataFrame(lhs_scaled, columns=param_names)
 
 
 def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
@@ -76,7 +159,7 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
 
     Expected sources:
     - ``simulation.num_simulations``
-    - ``sampling.method`` and ``sampling.param_ranges``
+    - ``sampling.method``, ``sampling.param_ranges``, and ``sampling.scale``
     - ``reproduction_number.params``
     - ``observation_model.params``
     """
@@ -116,6 +199,21 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
             )
         param_ranges[str(name)] = [lo, hi]
 
+    # Parse parameter scales (default to "linear")
+    param_scales_raw = sampling_cfg.get("param_scales", {}) or {}
+    if not isinstance(param_scales_raw, dict):
+        raise ValueError("sampling.scale must be a dictionary")
+    
+    param_scales: dict[str, str] = {}
+    for name, scale_type in param_scales_raw.items():
+        scale_type_str = str(scale_type).strip().lower()
+        if scale_type_str not in ("linear", "log"):
+            raise ValueError(
+                f"sampling.scale[{name!r}] must be 'linear' or 'log', "
+                f"got {scale_type_str!r}"
+            )
+        param_scales[str(name)] = scale_type_str
+
     rt_params_raw = rt_cfg.get("params", {}) or {}
     obs_params_raw = obs_cfg.get("params", {}) or {}
     if not isinstance(rt_params_raw, dict):
@@ -130,6 +228,7 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
         # num_simulations=num_simulations,
         method=method,
         param_ranges=param_ranges,
+        param_scales=param_scales,
         rt_params=rt_params,
         observation_params=observation_params,
     )
@@ -147,6 +246,7 @@ def build_calibration_params_df(
     - Start from fixed RT and observation parameters.
     - Apply LHS sampling for keys listed in ``sampling.param_ranges``.
     - On name collision, sampled values override fixed values.
+    - Parameter scales from ``sampling.scale`` are applied during sampling.
     """
     required_param_names = required_param_names or []
 
@@ -178,6 +278,7 @@ def build_calibration_params_df(
             param_ranges=param_ranges,
             num_simulations=n,
             rng=rng,
+            param_scales=sampling_config.param_scales,
         )
         for col in sampled_df.columns:
             params_df[col] = sampled_df[col].to_numpy()

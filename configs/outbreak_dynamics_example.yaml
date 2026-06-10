@@ -61,6 +61,10 @@ sampling:
     rt_logist_rmax:           [1.1,  4.0 ]
     notif_nb_overdispersion:  [0.1,  100 ]
     notif_scaling_factor:     [10,   3000]
+  # Scale specification: "linear" (default) or "log"
+  # Unspecified parameters default to linear scale.
+  param_scales:
+    notif_scaling_factor: log
 
 # ----------------------------------------------------------------------------
 initial_infections:
