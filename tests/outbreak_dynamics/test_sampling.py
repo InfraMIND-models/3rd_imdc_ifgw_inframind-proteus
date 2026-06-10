@@ -102,15 +102,6 @@ class TestParseCalibrationSamplingConfig:
         assert parsed.rt_params == {}
         assert parsed.observation_params == {}
 
-    def test_parse_rejects_unknown_method(self):
-        with pytest.raises(ValueError, match="Unsupported sampling.method"):
-            parse_calibration_sampling_config(
-                {
-                    "simulation": {"num_simulations": 10},
-                    "sampling": {"method": "sobol", "param_ranges": {}},
-                }
-            )
-
     def test_parse_rejects_bad_range_shape(self):
         with pytest.raises(ValueError, match=r"must be \[lo, hi\]"):
             parse_calibration_sampling_config(
@@ -129,6 +120,15 @@ class TestParseCalibrationSamplingConfig:
                 }
             )
 
+    def test_parse_invalid_rng_seed(self):
+        with pytest.raises(ValueError, match="sampling.rng_seed must be non-negative"):
+            parse_calibration_sampling_config(
+                {
+                    "simulation": {"num_simulations": 10},
+                    "sampling": {"param_ranges": {"x": [2.0, 1.0]}, "rng_seed": -1},
+                }
+            )
+
 
 class TestBuildCalibrationParamsDf:
     def test_fixed_only_returns_repeated_rows(self):
@@ -137,6 +137,7 @@ class TestBuildCalibrationParamsDf:
             param_ranges={},
             rt_params={"rt_logist_roff": 1.0},
             observation_params={"notif_nb_overdispersion": 8.0},
+            rng_seed=42,
         )
         out = build_calibration_params_df(
             num_simulations=4,
@@ -158,7 +159,6 @@ class TestBuildCalibrationParamsDf:
             num_simulations=20,
             sampling_config=cfg,
             required_param_names=["notif_scaling_factor"],
-            rng_seed=0,
         )
         assert out.shape == (20, 1)
         assert (out["notif_scaling_factor"] >= 10.0).all()
@@ -168,6 +168,7 @@ class TestBuildCalibrationParamsDf:
     def test_lhs_reproducible_with_same_seed(self):
         cfg = SamplingConfig(
             method="lhs",
+            rng_seed=42,
             param_ranges={"x": [0.0, 1.0]},
             rt_params={},
             observation_params={},
@@ -176,13 +177,11 @@ class TestBuildCalibrationParamsDf:
             num_simulations=25,
             sampling_config=cfg,
             required_param_names=["x"],
-            rng_seed=7,
         )
         out2 = build_calibration_params_df(
             num_simulations=25,
             sampling_config=cfg,
             required_param_names=["x"],
-            rng_seed=7,
         )
         pd.testing.assert_frame_equal(out1, out2)
 
@@ -200,6 +199,20 @@ class TestBuildCalibrationParamsDf:
                 required_param_names=["rt_logist_roff", "notif_nb_overdispersion"],
             )
 
+    def test_rejects_unknown_method(self):
+        cfg = SamplingConfig(
+            method="##INVALIDMETHOD",
+            param_ranges={"x": [1., 3.]},
+            rt_params={"rt_logist_roff": 1.0},
+            observation_params={},
+        )
+        print(f"WATCH: {cfg.method}")
+        with pytest.raises(ValueError, match="Unsupported sampling.method"):
+            build_calibration_params_df(
+                num_simulations=3,
+                sampling_config=cfg,
+                required_param_names=[],
+            )
 
 class TestSampleLhsWithScale:
     """Tests for log-scale and mixed-scale parameter sampling."""
@@ -367,6 +380,7 @@ class TestBuildCalibrationParamsDfWithScale:
         """Build params_df with log-scale sampling."""
         cfg = SamplingConfig(
             method="lhs",
+            rng_seed=42,
             param_ranges={"x": [0.1, 100.0]},
             param_scales={"x": "log"},
             rt_params={},
@@ -376,7 +390,6 @@ class TestBuildCalibrationParamsDfWithScale:
             num_simulations=50,
             sampling_config=cfg,
             required_param_names=["x"],
-            rng_seed=0,
         )
         assert out.shape == (50, 1)
         assert (out["x"] >= 0.1).all()
@@ -398,7 +411,6 @@ class TestBuildCalibrationParamsDfWithScale:
             num_simulations=50,
             sampling_config=cfg,
             required_param_names=["linear", "log", "fixed_param"],
-            rng_seed=42,
         )
         assert out.shape == (50, 3)
         assert (out["linear"] >= 1.0).all()

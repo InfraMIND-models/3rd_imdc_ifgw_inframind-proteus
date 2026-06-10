@@ -53,6 +53,8 @@ reproduction_number:
 sampling:
   # Parameters to explore during calibration.
   method: lhs
+
+  rng_seed: 123
   # Ranges are [lower_bound, upper_bound].
   # Listed parameters override the fixed values above.
   param_ranges:

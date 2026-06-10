@@ -22,6 +22,9 @@ class SamplingConfig:
     ----------
     method:
         Sampling method. Currently only ``"lhs"`` is supported.
+    rng_seed:
+        Seed to the random number generator. If None, the generator will be
+        initialized with a time-based seed.
     param_ranges:
         Parameter ranges to be sampled, mapping parameter name to
         ``[lower_bound, upper_bound]``.
@@ -38,6 +41,7 @@ class SamplingConfig:
 
     # num_simulations: int# = 1000
     method: str = "lhs"
+    rng_seed: int | None = None
     param_ranges: dict[str, list[float]] = field(default_factory=dict)
     param_scales: dict[str, str] = field(default_factory=dict)
     rt_params: dict[str, float] = field(default_factory=dict)
@@ -154,6 +158,54 @@ def sample_lhs(
     return pd.DataFrame(lhs_scaled, columns=param_names)
 
 
+# def sample_sobol(
+#     param_ranges: dict[str, list[float]],
+#     num_simulations: int,
+#     rng: Generator,
+#     param_scales: dict[str, str] | None = None,
+# ) -> pd.DataFrame:
+#     """Draw a Latin Hypercube sample scaled to the given parameter ranges.
+#
+#     Parameters
+#     ----------
+#     param_ranges:
+#         Mapping from parameter name to ``[lower_bound, upper_bound]``.
+#     num_simulations:
+#         Number of samples (rows in the output).
+#     rng:
+#         NumPy random generator instance.
+#     param_scales:
+#         Mapping from parameter name to scale type. Supported values:
+#         ``"linear"`` (default) or ``"log"`` (logarithmic).
+#         For log-scale parameters, the bounds are interpreted as linear values,
+#         but sampling occurs in log-space: samples are drawn uniformly from
+#         ``[log(lower), log(upper)]`` and then exponentiated.
+#
+#     Returns
+#     -------
+#     pd.DataFrame
+#         Shape ``(num_simulations, len(param_ranges))``, columns are
+#         parameter names.
+#     """
+#     param_scales = param_scales or {}
+#     param_names = list(param_ranges.keys())
+#
+#     l_bounds, u_bounds = _get_scaled_bounds(
+#         param_ranges=param_ranges,
+#         param_scales=param_scales,
+#         param_names=param_names,
+#     )
+#
+#     lhs_sampler = scipy.stats.qmc.LatinHypercube(d=len(param_ranges), rng=rng)
+#     lhs_samples = lhs_sampler.random(n=num_simulations)
+#
+#     # Scale to bounds (in potentially transformed space)
+#     lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
+#     _transform_sampled_parameters(lhs_scaled, param_scales, param_names)
+#
+#     return pd.DataFrame(lhs_scaled, columns=param_names)
+
+
 def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
     """Parse calibration sampling settings from a YAML-like config dictionary.
 
@@ -176,10 +228,12 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
         )
 
     method = str(sampling_cfg.get("method", "lhs")).strip().lower()
-    if method != "lhs":
-        raise ValueError(
-            f"Unsupported sampling.method {method!r}. Supported methods: ['lhs']"
-        )
+
+    rng_seed = sampling_cfg.get("rng_seed", None)
+    if not isinstance(rng_seed, int) and rng_seed is not None:
+        raise TypeError(f"sampling.rng_seed must be an integer or None, got {rng_seed!r}")
+    if rng_seed is not None and rng_seed < 0:
+        raise ValueError(f"sampling.rng_seed must be non-negative, got {rng_seed}")
 
     param_ranges_raw = sampling_cfg.get("param_ranges", {}) or {}
     if not isinstance(param_ranges_raw, dict):
@@ -227,6 +281,7 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
     return SamplingConfig(
         # num_simulations=num_simulations,
         method=method,
+        rng_seed=rng_seed,
         param_ranges=param_ranges,
         param_scales=param_scales,
         rt_params=rt_params,
@@ -238,7 +293,6 @@ def build_calibration_params_df(
     num_simulations: int,
     sampling_config: SamplingConfig,
     required_param_names: list[str] | None = None,
-    rng_seed: int | None = None,
 ) -> pd.DataFrame:
     """Build a calibration ``params_df`` from fixed and sampled parameters.
 
@@ -268,18 +322,27 @@ def build_calibration_params_df(
 
     param_ranges = sampling_config.param_ranges
     if param_ranges:
-        if sampling_config.method != "lhs":
-            raise ValueError(
-                "build_calibration_params_df currently supports only sampling "
-                "method 'lhs'"
+
+        # rng = np.random.default_rng(rng_seed)
+        rng = np.random.default_rng(sampling_config.rng_seed)
+
+        if sampling_config.method == "lhs":
+            sampled_df = sample_lhs(
+                param_ranges=param_ranges,
+                num_simulations=n,
+                rng=rng,
+                param_scales=sampling_config.param_scales,
             )
-        rng = np.random.default_rng(rng_seed)
-        sampled_df = sample_lhs(
-            param_ranges=param_ranges,
-            num_simulations=n,
-            rng=rng,
-            param_scales=sampling_config.param_scales,
-        )
+
+        elif sampling_config.method == "sobol":
+            raise NotImplementedError("Sobol sampling not implemented yet")
+
+        else:
+            raise ValueError(
+                f"Unsupported sampling.method: {sampling_config.method!r}. "
+            )
+
+
         for col in sampled_df.columns:
             params_df[col] = sampled_df[col].to_numpy()
 
