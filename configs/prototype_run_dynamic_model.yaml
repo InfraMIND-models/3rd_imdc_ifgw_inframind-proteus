@@ -8,15 +8,15 @@
 simulation:
   mode: calibration            # "calibration" | "projection"
   num_simulations: 1000
-  num_time_steps: 50           # steps after the warm-up window
+  num_time_steps: 61           # steps after the warm-up window
   gt_max: 49                   # maximum generation time (days)
   rng_seed: 123
 
 # ----------------------------------------------------------------------------
 temporal:
   # Timestamps accept: ISO date ("YYYY-MM-DD"), float days, or YYYYWW integer.
-  zero_date: "2023-10-02"
-  sim_start: "2023-10-01"
+  zero_date: "2023-10-01"
+  sim_start: "2023-07-16"
   calibration_start: "2023-10-01"    # calibration mode only
   calibration_end:   "2024-04-01"    # calibration mode only
   step_dt: 7                         # days per step (7 = weekly)
@@ -42,29 +42,34 @@ reproduction_number:
   # for dimensions that are sampled.
   params:
     rt_logist_roff:   1.0        # R outside the active window (off-season)
-    rt_logist_start:  50.0       # day the logistic window opens (relative to zero_date)
-    rt_logist_end:    360.0      # day the logistic window closes (returns to roff)
-    rt_logist_center: 150.0      # inflection point (days)
-    rt_logist_width:  40.0       # steepness (days); larger = smoother
-    rt_logist_rmin:   0.2        # asymptotic minimum R during outbreak
-    rt_logist_rmax:   1.6        # peak R ("R0"-like)
+    rt_logist_start:  50.0       # day the logistic window opens
+    rt_logist_end:    280.0      # day the logistic window closes (returns to roff)
+    rt_logist_center: 80         # Duration from start to inflection point (days)
+    rt_logist_width:  13.0       # steepness (days); larger = smoother
+    rt_logist_rmin:   0.4        # asymptotic minimum R during outbreak
+    rt_logist_rmax:   1.6        # peak R ("R0"-like) during outbreak
 
 # ----------------------------------------------------------------------------
 sampling:
   # Parameters to explore during calibration.
-  method: lhs
+  method: sobol  # lhs, sobol
+  rng_seed: 123
+
   # Ranges are [lower_bound, upper_bound].
   # Listed parameters override the fixed values above.
   param_ranges:
-#    rt_logist_width:          [1, 80  ]
-    rt_logist_width:          [25, 45  ]  # Fine
-#    rt_logist_center:         [10, 280 ]
-#    rt_logist_center:         [130,  180 ]  # Fine
-    rt_logist_start:          [10, 120]
-    rt_logist_rmax:           [1.1,  4.0 ]
-#    notif_nb_overdispersion:  [0.1,  100 ]
-#    notif_scaling_factor:     [1, 1000] # [100,   7000]
-#    notif_scaling_factor:     [2000, 30000]
+    rt_logist_start:          [-30,    200  ]
+#    rt_logist_width:          [1,    100  ]
+#    rt_logist_center:         [10,   200 ]
+    rt_logist_rmax:           [1.05,  4.0 ]
+    notif_nb_overdispersion:  [0.1,  100 ]
+#    notif_scaling_factor:     [10,   3000]
+
+  # Scale specification: "linear" (default) or "log"
+  # Unspecified parameters default to linear scale.
+  param_scales:
+    notif_scaling_factor: log
+#    notif_nb_overdispersion: inverse
 
 # ----------------------------------------------------------------------------
 initial_infections:
@@ -76,8 +81,8 @@ initial_infections:
 # ----------------------------------------------------------------------------
 observation_model:
   params:
-    notif_nb_overdispersion: 1000.0
-    notif_scaling_factor:     8000
+    notif_nb_overdispersion: 10.0
+    notif_scaling_factor:     250.
 
 # ----------------------------------------------------------------------------
 scoring:

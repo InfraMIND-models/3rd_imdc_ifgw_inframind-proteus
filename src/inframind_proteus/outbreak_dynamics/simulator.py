@@ -620,12 +620,12 @@ class RenewalSimulator:
         )
         summary_df["rmse"] = rmse_array
 
-        # Negative-binomial loglikelihood
-        summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
-            simulations_df=simulations_median_df,
-            observations_sr=observations_sr,
-            overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
-        )
+        # # Negative-binomial loglikelihood (TEMPORARILY DISABLED)
+        # summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
+        #     simulations_df=simulations_median_df,
+        #     observations_sr=observations_sr,
+        #     overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
+        # )
 
         scoring = SimulationScoring(
             wis_array=wis_array,

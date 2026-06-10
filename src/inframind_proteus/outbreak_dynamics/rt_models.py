@@ -90,7 +90,7 @@ class LogisticRT(BaseRT):
     rt_logist_roff    : R value outside the active window (off-season baseline)
     rt_logist_start   : Day (float) at which the logistic window opens
     rt_logist_end     : Day (float) at which the logistic window closes
-    rt_logist_center  : Inflection point of the logistic (days)
+    rt_logist_center  : Inflection point of the logistic (days) after start
     rt_logist_width   : Steepness parameter (days); larger = smoother decline
     rt_logist_rmin    : Asymptotic minimum R during outbreak
     rt_logist_rmax    : Peak / "R0"-like maximum R at outbreak onset
@@ -152,7 +152,8 @@ class LogisticRT(BaseRT):
         # exp() may overflow when the exponent is very large (t far before center),
         # which is correct — the logistic saturates to rmax in that limit.
         with np.errstate(over="ignore"):
-            exponent = (rt_center - time_grid) / rt_width
+            # exponent = (rt_center - time_grid) / rt_width  # Old: Center relative to date_zero
+            exponent = (rt_start + rt_center - time_grid) / rt_width  # New: Center relative to start of active window
             logistic_vals = rt_rmax - (rt_rmax - rt_rmin) / (1.0 + np.exp(exponent))
 
         # Outside the active window R(t) = roff
