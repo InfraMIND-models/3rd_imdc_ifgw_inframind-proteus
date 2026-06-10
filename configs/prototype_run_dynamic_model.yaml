@@ -62,7 +62,7 @@ sampling:
 #    rt_logist_width:          [1,    100  ]
 #    rt_logist_center:         [10,   200 ]
     rt_logist_rmax:           [1.05,  4.0 ]
-    notif_nb_overdispersion:  [0.1,  100 ]
+#    notif_nb_overdispersion:  [0.1,  100 ]
 #    notif_scaling_factor:     [10,   3000]
 
   # Scale specification: "linear" (default) or "log"
@@ -81,7 +81,7 @@ initial_infections:
 # ----------------------------------------------------------------------------
 observation_model:
   params:
-    notif_nb_overdispersion: 10.0
+    notif_nb_overdispersion: 100.0
     notif_scaling_factor:     250.
 
 # ----------------------------------------------------------------------------

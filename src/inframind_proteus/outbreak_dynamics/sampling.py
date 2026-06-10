@@ -83,9 +83,21 @@ def _get_scaled_bounds(
                 )
             l_bounds.append(np.log(bounds[0]))
             u_bounds.append(np.log(bounds[1]))
+
         elif scale == "linear":
             l_bounds.append(bounds[0])
             u_bounds.append(bounds[1])
+
+        elif scale == "inverse":
+            if bounds[0] * bounds[1] <= 0:
+                raise ValueError(
+                    f"Inverse-scale parameter {param_name!r} bounds must be both "
+                    f"either positive or negative, excluding zero. "
+                    f"got {bounds}"
+                )
+            l_bounds.append(1.0 / bounds[1])  # Inverse of upper bound becomes lower bound in transformed space
+            u_bounds.append(1.0 / bounds[0])  # Inverse of lower bound becomes upper bound in transformed space
+
         else:
             raise ValueError(
                 f"Unsupported scale for parameter {param_name!r}: {scale!r}. "
@@ -109,6 +121,9 @@ def _transform_sampled_parameters(
         # Apply exponential transformation for log-scale parameters
         if scale == "log":
             lhs_scaled[:, i] = np.exp(lhs_scaled[:, i])
+
+        if scale == "inverse":
+            lhs_scaled[:, i] = 1.0 / lhs_scaled[:, i]
 
 
 def sample_lhs(
