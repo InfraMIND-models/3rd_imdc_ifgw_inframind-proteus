@@ -3,12 +3,14 @@
 import numpy as np
 import pandas as pd
 import pytest
+import inframind_proteus.outbreak_dynamics.sampling as sampling_module
 
 from inframind_proteus.outbreak_dynamics.sampling import (
     SamplingConfig,
     build_calibration_params_df,
     parse_calibration_sampling_config,
     sample_lhs,
+    sample_sobol,
 )
 
 
@@ -60,6 +62,58 @@ class TestSampleLhs:
         df = sample_lhs({"x": [0.0, 1.0]}, num_simulations=n, rng=rng)
         strata = (df["x"] * n).astype(int).clip(0, n - 1)
         assert strata.nunique() == n, "LHS strata are not all covered"
+
+
+class TestSampleSobol:
+    RANGES = {
+        "alpha": [0.0, 1.0],
+        "beta": [10.0, 100.0],
+        "gamma": [-5.0, 5.0],
+    }
+
+    def test_output_shape(self):
+        rng = np.random.default_rng(0)
+        df = sample_sobol(self.RANGES, num_simulations=64, rng=rng)
+        assert df.shape == (64, 3)
+
+    def test_column_names(self):
+        rng = np.random.default_rng(0)
+        df = sample_sobol(self.RANGES, num_simulations=16, rng=rng)
+        assert list(df.columns) == list(self.RANGES.keys())
+
+    def test_values_within_bounds(self):
+        rng = np.random.default_rng(42)
+        df = sample_sobol(self.RANGES, num_simulations=128, rng=rng)
+        for col, (lo, hi) in self.RANGES.items():
+            assert (df[col] >= lo).all(), f"{col}: value below lower bound"
+            assert (df[col] <= hi).all(), f"{col}: value above upper bound"
+
+    def test_reproducible_with_same_seed(self):
+        ranges = {"x": [0.0, 1.0], "y": [0.0, 1.0]}
+        df1 = sample_sobol(ranges, num_simulations=32, rng=np.random.default_rng(7))
+        df2 = sample_sobol(ranges, num_simulations=32, rng=np.random.default_rng(7))
+        pd.testing.assert_frame_equal(df1, df2)
+
+    def test_different_seeds_differ(self):
+        ranges = {"x": [0.0, 1.0]}
+        df1 = sample_sobol(ranges, num_simulations=32, rng=np.random.default_rng(1))
+        df2 = sample_sobol(ranges, num_simulations=32, rng=np.random.default_rng(2))
+        assert not df1.equals(df2)
+
+    def test_log_scale_values_within_bounds(self):
+        ranges = {"x": [0.1, 100.0]}
+        param_scales = {"x": "log"}
+        rng = np.random.default_rng(42)
+        df = sample_sobol(ranges, num_simulations=64, rng=rng, param_scales=param_scales)
+        assert (df["x"] >= 0.1).all()
+        assert (df["x"] <= 100.0).all()
+
+    def test_invalid_scale_type_raises(self):
+        ranges = {"x": [1.0, 10.0]}
+        param_scales = {"x": "invalid"}
+        rng = np.random.default_rng(0)
+        with pytest.raises(ValueError, match="Unsupported scale"):
+            sample_sobol(ranges, num_simulations=16, rng=rng, param_scales=param_scales)
 
 
 class TestParseCalibrationSamplingConfig:
@@ -128,6 +182,18 @@ class TestParseCalibrationSamplingConfig:
                     "sampling": {"param_ranges": {"x": [2.0, 1.0]}, "rng_seed": -1},
                 }
             )
+
+    def test_parse_sampling_method_sobol(self):
+        parsed = parse_calibration_sampling_config(
+            {
+                "simulation": {"num_simulations": 10},
+                "sampling": {
+                    "method": "SOBOL",
+                    "param_ranges": {"x": [0.0, 1.0]},
+                },
+            }
+        )
+        assert parsed.method == "sobol"
 
 
 class TestBuildCalibrationParamsDf:
@@ -213,6 +279,71 @@ class TestBuildCalibrationParamsDf:
                 sampling_config=cfg,
                 required_param_names=[],
             )
+
+    def test_sobol_overrides_fixed_values_for_same_column(self):
+        cfg = SamplingConfig(
+            method="sobol",
+            param_ranges={"notif_scaling_factor": [10.0, 20.0]},
+            rt_params={},
+            observation_params={"notif_scaling_factor": 1.0},
+            rng_seed=42,
+        )
+        out = build_calibration_params_df(
+            num_simulations=32,
+            sampling_config=cfg,
+            required_param_names=["notif_scaling_factor"],
+        )
+        assert out.shape == (32, 1)
+        assert (out["notif_scaling_factor"] >= 10.0).all()
+        assert (out["notif_scaling_factor"] <= 20.0).all()
+        assert not (out["notif_scaling_factor"] == 1.0).all()
+
+    def test_sobol_reproducible_with_same_seed(self):
+        cfg = SamplingConfig(
+            method="sobol",
+            rng_seed=42,
+            param_ranges={"x": [0.0, 1.0]},
+            rt_params={},
+            observation_params={},
+        )
+        out1 = build_calibration_params_df(
+            num_simulations=32,
+            sampling_config=cfg,
+            required_param_names=["x"],
+        )
+        out2 = build_calibration_params_df(
+            num_simulations=32,
+            sampling_config=cfg,
+            required_param_names=["x"],
+        )
+        pd.testing.assert_frame_equal(out1, out2)
+
+    def test_selects_sobol_sampler_when_method_is_sobol(self, monkeypatch):
+        def _stub_sample_sobol(param_ranges, num_simulations, rng, param_scales=None):
+            return pd.DataFrame({"x": np.full(num_simulations, 0.5)})
+
+        def _raise_if_lhs_called(*args, **kwargs):
+            raise AssertionError("sample_lhs should not be called for method='sobol'")
+
+        monkeypatch.setattr(sampling_module, "sample_sobol", _stub_sample_sobol)
+        monkeypatch.setattr(sampling_module, "sample_lhs", _raise_if_lhs_called)
+
+        cfg = SamplingConfig(
+            method="sobol",
+            param_ranges={"x": [0.0, 1.0]},
+            rt_params={},
+            observation_params={},
+            rng_seed=123,
+        )
+
+        out = build_calibration_params_df(
+            num_simulations=8,
+            sampling_config=cfg,
+            required_param_names=["x"],
+        )
+
+        assert out.shape == (8, 1)
+        assert (out["x"] == 0.5).all()
 
 class TestSampleLhsWithScale:
     """Tests for log-scale and mixed-scale parameter sampling."""

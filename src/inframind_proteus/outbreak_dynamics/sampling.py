@@ -6,6 +6,7 @@ ensembles. Additional sampling helpers should be added here.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -158,52 +159,52 @@ def sample_lhs(
     return pd.DataFrame(lhs_scaled, columns=param_names)
 
 
-# def sample_sobol(
-#     param_ranges: dict[str, list[float]],
-#     num_simulations: int,
-#     rng: Generator,
-#     param_scales: dict[str, str] | None = None,
-# ) -> pd.DataFrame:
-#     """Draw a Latin Hypercube sample scaled to the given parameter ranges.
-#
-#     Parameters
-#     ----------
-#     param_ranges:
-#         Mapping from parameter name to ``[lower_bound, upper_bound]``.
-#     num_simulations:
-#         Number of samples (rows in the output).
-#     rng:
-#         NumPy random generator instance.
-#     param_scales:
-#         Mapping from parameter name to scale type. Supported values:
-#         ``"linear"`` (default) or ``"log"`` (logarithmic).
-#         For log-scale parameters, the bounds are interpreted as linear values,
-#         but sampling occurs in log-space: samples are drawn uniformly from
-#         ``[log(lower), log(upper)]`` and then exponentiated.
-#
-#     Returns
-#     -------
-#     pd.DataFrame
-#         Shape ``(num_simulations, len(param_ranges))``, columns are
-#         parameter names.
-#     """
-#     param_scales = param_scales or {}
-#     param_names = list(param_ranges.keys())
-#
-#     l_bounds, u_bounds = _get_scaled_bounds(
-#         param_ranges=param_ranges,
-#         param_scales=param_scales,
-#         param_names=param_names,
-#     )
-#
-#     lhs_sampler = scipy.stats.qmc.LatinHypercube(d=len(param_ranges), rng=rng)
-#     lhs_samples = lhs_sampler.random(n=num_simulations)
-#
-#     # Scale to bounds (in potentially transformed space)
-#     lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
-#     _transform_sampled_parameters(lhs_scaled, param_scales, param_names)
-#
-#     return pd.DataFrame(lhs_scaled, columns=param_names)
+def sample_sobol(
+    param_ranges: dict[str, list[float]],
+    num_simulations: int,
+    rng: Generator,
+    param_scales: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    """Draw a Sobol sequence sample scaled to the given parameter ranges.
+
+    Parameters
+    ----------
+    param_ranges:
+        Mapping from parameter name to ``[lower_bound, upper_bound]``.
+    num_simulations:
+        Number of samples (rows in the output).
+    rng:
+        NumPy random generator instance.
+    param_scales:
+        Mapping from parameter name to scale type. Supported values:
+        ``"linear"`` (default) or ``"log"`` (logarithmic).
+        For log-scale parameters, the bounds are interpreted as linear values,
+        but sampling occurs in log-space: samples are drawn uniformly from
+        ``[log(lower), log(upper)]`` and then exponentiated.
+
+    Returns
+    -------
+    pd.DataFrame
+        Shape ``(num_simulations, len(param_ranges))``, columns are
+        parameter names.
+    """
+    param_scales = param_scales or {}
+    param_names = list(param_ranges.keys())
+
+    l_bounds, u_bounds = _get_scaled_bounds(
+        param_ranges=param_ranges,
+        param_scales=param_scales,
+        param_names=param_names,
+    )
+
+    sampler = scipy.stats.qmc.Sobol(d=len(param_ranges), rng=rng)
+    samples = sampler.random(n=num_simulations)
+
+    # Scale to bounds (in potentially transformed space)
+    scaled_samples = scipy.stats.qmc.scale(samples, l_bounds, u_bounds)
+    _transform_sampled_parameters(scaled_samples, param_scales, param_names)
+
+    return pd.DataFrame(scaled_samples, columns=param_names)
 
 
 def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
@@ -293,6 +294,7 @@ def build_calibration_params_df(
     num_simulations: int,
     sampling_config: SamplingConfig,
     required_param_names: list[str] | None = None,
+    **kwargs
 ) -> pd.DataFrame:
     """Build a calibration ``params_df`` from fixed and sampled parameters.
 
@@ -305,22 +307,15 @@ def build_calibration_params_df(
     required_param_names = required_param_names or []
 
     # n = int(sampling_config.num_simulations)
-    n = num_simulations
-    if n <= 0:
-        raise ValueError(f"num_simulations must be > 0, got {n}")
+    if num_simulations<= 0:
+        raise ValueError(f"num_simulations must be > 0, got {num_simulations}")
 
     fixed_params: dict[str, float] = {}
     fixed_params.update(sampling_config.rt_params)
     fixed_params.update(sampling_config.observation_params)
 
-    if fixed_params:
-        params_df = pd.DataFrame(
-            {name: np.full(n, value, dtype=float) for name, value in fixed_params.items()}
-        )
-    else:
-        params_df = pd.DataFrame(index=np.arange(n))
-
     param_ranges = sampling_config.param_ranges
+
     if param_ranges:
 
         # rng = np.random.default_rng(rng_seed)
@@ -329,22 +324,58 @@ def build_calibration_params_df(
         if sampling_config.method == "lhs":
             sampled_df = sample_lhs(
                 param_ranges=param_ranges,
-                num_simulations=n,
+                num_simulations=num_simulations,
                 rng=rng,
                 param_scales=sampling_config.param_scales,
             )
 
         elif sampling_config.method == "sobol":
-            raise NotImplementedError("Sobol sampling not implemented yet")
+            sampled_df = sample_sobol(
+                param_ranges=param_ranges,
+                num_simulations=num_simulations,
+                rng=rng,
+                param_scales=sampling_config.param_scales,
+            )
+
+        elif sampling_config.method == "given":
+            # Build with pre-sampled parameters provided via kwargs
+            if "given_params" not in kwargs:
+                raise ValueError(
+                    "sampling.method is 'given' but no 'given_params' provided in kwargs"
+                )
+            sampled_df = kwargs["given_params"]
 
         else:
             raise ValueError(
                 f"Unsupported sampling.method: {sampling_config.method!r}. "
             )
 
+        # ---
+        # Check for sample size change (expected for some methods)
+        if sampled_df.shape[0] != num_simulations:
+            warnings.warn(
+                f"Sampling method \"{sampling_config.method!r}\" produced "
+                f"{len(sampled_df)} samples, different from {num_simulations=}."
+                f" This is expected for some methods, "
+                f"but you may have to update num_simulations to `params_df.shape[0]`"
+                f" for the new value after this function."
+            )
+            num_simulations =  sampled_df.shape[0]
 
-        for col in sampled_df.columns:
-            params_df[col] = sampled_df[col].to_numpy()
+    else:
+        sampled_df = pd.DataFrame({})
+
+    # Combine fixed and sampled
+    if fixed_params:
+        params_df = pd.DataFrame(
+            {name: np.full(num_simulations, value, dtype=float) for name, value in fixed_params.items()}
+        )
+    else:
+        params_df = pd.DataFrame(index=np.arange(num_simulations))
+    params_df.index.name = "i_simulation"
+
+    for col in sampled_df.columns:
+        params_df[col] = sampled_df[col].to_numpy()
 
     missing = [p for p in required_param_names if p not in params_df.columns]
     if missing:

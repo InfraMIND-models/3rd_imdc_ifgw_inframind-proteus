@@ -52,8 +52,7 @@ reproduction_number:
 # ----------------------------------------------------------------------------
 sampling:
   # Parameters to explore during calibration.
-  method: lhs
-
+  method: sobol  # lhs, sobol
   rng_seed: 123
   # Ranges are [lower_bound, upper_bound].
   # Listed parameters override the fixed values above.
