@@ -34,7 +34,7 @@ from .initial_infections import (
     build_initial_infec_df,
     parse_initial_infections_config,
 )
-from .rt_models import BaseRT, LogisticRT
+from .rt_models import BaseRT, LogisticRT, get_rt_model
 from .sampling import SamplingConfig, parse_calibration_sampling_config
 from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized
 from .utils import parse_timestamp
@@ -707,13 +707,7 @@ class RenewalSimulator:
         initial_infections_cfg = parse_initial_infections_config(config_dict)
 
         rt_model_name = str(rt_cfg.get("model", "logistic")).strip().lower()
-        if rt_model_name == "logistic":
-            rt_model = LogisticRT()
-        else:
-            raise ValueError(
-                "Unsupported reproduction_number.model: "
-                f"{rt_cfg.get('model')!r}. Supported models: ['logistic']"
-            )
+        rt_model = get_rt_model(rt_model_name)
 
         gt_model_name = str(gt_cfg.get("model", "constant_gamma")).strip().lower()
         gt_params = gt_cfg.get("params", {}) or {}

@@ -839,7 +839,7 @@ class TestFactory:
             )
 
     def test_from_config_dict_invalid_rt_model_raises(self):
-        with pytest.raises(ValueError, match="Unsupported reproduction_number.model"):
+        with pytest.raises(ValueError, match="Unsupported reproduction number model"):
             RenewalSimulator.from_config_dict(
                 config_dict={
                     "simulation": {"num_simulations": 10},

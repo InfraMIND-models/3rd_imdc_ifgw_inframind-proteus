@@ -37,17 +37,26 @@ generation_time:
 
 # ----------------------------------------------------------------------------
 reproduction_number:
-  model: logistic
+  model: enveloped_logistic
   # Fixed (non-sampled) defaults — overridden by sampling.lhs_params below
   # for dimensions that are sampled.
   params:
-    rt_logist_roff:   1.0        # R outside the active window (off-season)
-    rt_logist_start:  50.0       # day the logistic window opens
-    rt_logist_end:    280.0      # day the logistic window closes (returns to roff)
-    rt_logist_center: 80         # Duration from start to inflection point (days)
-    rt_logist_width:  13.0       # steepness (days); larger = smoother
-    rt_logist_rmin:   0.4        # asymptotic minimum R during outbreak
-    rt_logist_rmax:   1.6        # peak R ("R0"-like) during outbreak
+      rt_logist_start:     50.0
+      rt_logist_dt_center: 50.0
+      rt_logist_dt_end:    100.0
+      rt_logist_w_center:  5.0
+      rt_logist_w_env:     2.0
+      rt_logist_r_low:     0.5
+      rt_logist_r_high:    2.0
+
+#    # --- Prototype logistic model (deprecated)
+#    rt_logist_roff:   1.0        # R outside the active window (off-season)
+#    rt_logist_start:  50.0       # day the logistic window opens
+#    rt_logist_end:    280.0      # day the logistic window closes (returns to roff)
+#    rt_logist_center: 80         # Duration from start to inflection point (days)
+#    rt_logist_width:  13.9       # steepness (days); larger = smoother
+#    rt_logist_rmin:   0.4        # asymptotic minimum R during outbreak
+#    rt_logist_rmax:   1.6        # peak R ("R0"-like) during outbreak
 
 # ----------------------------------------------------------------------------
 sampling:
@@ -58,13 +67,23 @@ sampling:
   # Ranges are [lower_bound, upper_bound].
   # Listed parameters override the fixed values above.
   param_ranges:
-    rt_logist_start:          [-30,    200  ]
-#    rt_logist_width:          [1,    100  ]
-#    rt_logist_center:         [10,   200 ]
-    rt_logist_rmax:           [1.05,  4.0 ]
-#    notif_nb_overdispersion:  [0.1,  100 ]
-#    notif_scaling_factor:     [10,   3000]
-#    notif_relative_scale:     [0.1,  10.0 ]
+
+    # --- Enveloped logistic model
+    rt_logist_r_high: [1.05, 4.5]
+    rt_logist_start: [-30, 200]
+    notif_relative_scale: [0.1, 50.0]
+    rt_logist_dt_end:  [50, 200]
+    rt_logist_dt_center:  [10, 150]
+    rt_logist_w_center:   [0.5, 15.]
+
+#    # --- Old (prototype) logistic model - Deprecated
+#    rt_logist_start:          [-30,    200  ]
+##    rt_logist_width:          [1,    100  ]
+##    rt_logist_center:         [10,   200 ]
+#    rt_logist_rmax:           [1.05,  4.5 ]
+##    notif_nb_overdispersion:  [0.1,  100 ]
+##    notif_scaling_factor:     [10,   3000]
+##    notif_relative_scale:     [0.1,  50.0 ]
 
   # Scale specification: "linear" (default) or "log"
   # Unspecified parameters default to linear scale.
@@ -84,7 +103,7 @@ observation_model:
   params:
     notif_nb_overdispersion: 100.0
     notif_scaling_factor:     250.
-    notif_relative_scale:   1.0    # scaling = relative_scaling * population / 100k
+    notif_relative_scale:  5.2  # 1.0    # scaling = relative_scaling * population / 100k
 
 # ----------------------------------------------------------------------------
 scoring:
