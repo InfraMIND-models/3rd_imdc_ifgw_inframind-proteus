@@ -121,6 +121,13 @@ class SimulationConfig:
         Initial infection seeding configuration.
     rng_seed:
         Global RNG seed for the observation model sampling.
+    reference_population_size:
+        Denominator for normalizing incidences per population size. Default
+        is 100k (1E5), only change this if there is a clear reason.
+    population_size:
+        Population size for the simulated location. Required if using relative
+        scaling scheme for the observation model. Defaults to the reference
+        population.
     """
 
     mode: Literal["calibration", "projection"] = "projection"
@@ -149,6 +156,9 @@ class SimulationConfig:
         default_factory=InitialInfectionsConfig
     )
     rng_seed: int = 0
+
+    reference_population_size: int = int(1E5)  # For normalizing incidence per population
+    population_size: int = int(1E5)
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +217,16 @@ class SimulationOutput:
 # Simulator
 # ---------------------------------------------------------------------------
 
+def _validate_population_size(population_size):
+    if population_size is None:
+        raise ValueError(
+            "population_size must be provided when using "
+            "notif_relative_scale"
+        )
+    if population_size < 0:
+        raise ValueError(f"population_size must be non-negative. Got {population_size}.")
+
+
 class RenewalSimulator:
     """Vectorised renewal equation simulator.
 
@@ -251,7 +271,8 @@ class RenewalSimulator:
             Parameter table.  One row per simulation.  Must contain all
             columns required by ``rt_model``, plus
             ``notif_nb_overdispersion`` and ``notif_scaling_factor`` when
-            those should vary across simulations.
+            those should vary across simulations. May also contain the optional
+            ``notif_relative_scale`` column for relative scaling.
         initial_infec_df:
             Seed infection values for the warm-up window.
             Shape ``(num_simulations, gt_max_steps)``.
@@ -355,7 +376,9 @@ class RenewalSimulator:
         infec_sim = infec_vec[:, gt_steps:]  # (num_sim, num_steps)
 
         cases_vec, case_beam_df = self._apply_observation_model(
-            infec_sim, _params, rng
+            infec_sim, _params, rng,
+            population_size=cfg.population_size,
+            reference_population_size=cfg.reference_population_size,
         )
 
         # ------------------------------------------------------------------
@@ -475,6 +498,8 @@ class RenewalSimulator:
         infec_vec: np.ndarray,
         params_df: pd.DataFrame,
         rng: np.random.Generator,
+        population_size: int | None = None,
+        reference_population_size: int = SimulationConfig.reference_population_size
     ) -> tuple[np.ndarray, pd.DataFrame]:
         """Apply the negative-binomial observation (notification) model.
 
@@ -485,7 +510,10 @@ class RenewalSimulator:
             Shape ``(num_simulations, num_time_steps)`` (warm-up excluded).
         params_df:
             Parameter table with ``notif_nb_overdispersion`` and
-            ``notif_scaling_factor`` columns.
+            ``notif_scaling_factor`` columns. Optionally may contain
+            ``notif_relative_scale`` for population-relative scaling, in which
+            case ``notif_scaling_factor`` is overridden by the internal
+            algorithm.
         rng:
             NumPy random generator.
 
@@ -507,8 +535,20 @@ class RenewalSimulator:
                 f"{required_cols}; missing: {missing_cols}"
             )
 
+
         overdisp = params_df["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
-        scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
+        # Get alternative scaling scheme
+        if "notif_relative_scale" in params_df.columns:
+            # Population-relative scaling factor
+            _validate_population_size(population_size)
+            scale_f = (
+                    params_df["notif_relative_scale"].to_numpy()[:, np.newaxis]
+                    * population_size
+                    / reference_population_size
+            )
+        else:
+            # Directly provided scaling factor
+            scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
 
         # Expected reported cases; clip to avoid negative expectations
         expectancy = np.clip(infec_vec * scale_f, 0.0, None)

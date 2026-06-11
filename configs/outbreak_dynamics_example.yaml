@@ -82,6 +82,7 @@ observation_model:
   params:
     notif_nb_overdispersion: 10.0
     notif_scaling_factor:     250.
+    #    notif_relative_scale:   1.0    # scaling = relative_scaling * population / 100k
 
 # ----------------------------------------------------------------------------
 scoring:

@@ -339,6 +339,16 @@ class TestObservationModel:
         with pytest.raises(ValueError, match="missing"):
             sim._apply_observation_model(infec, bad_params, np.random.default_rng(0))
 
+    def test_negative_population_raises(self, sim, params):
+        infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
+        params["notif_relative_scale"] = 1.0
+        population_size = -int(1E5)
+        with pytest.raises(ValueError, match="population_size must be non-negative"):
+            sim._apply_observation_model(
+                infec, params, np.random.default_rng(0),
+                population_size=population_size,
+            )
+
 
 # ---------------------------------------------------------------------------
 # TestRun — integration
