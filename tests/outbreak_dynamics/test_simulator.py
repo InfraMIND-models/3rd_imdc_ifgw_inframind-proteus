@@ -349,6 +349,90 @@ class TestObservationModel:
                 population_size=population_size,
             )
 
+    def test_relative_scaling_equivalent_to_absolute_scaling(self, sim, params):
+        """Equivalent absolute/relative scaling should produce identical outputs."""
+        infec = np.full((sim.config.num_simulations, sim.config.num_time_steps), 10.0)
+        pop = int(2e5)
+        ref_pop = int(1e5)
+        relative_scale = 0.5
+        effective_scale = relative_scale * pop / ref_pop
+
+        params_abs = params.copy()
+        params_abs["notif_scaling_factor"] = effective_scale
+
+        params_rel = params.copy()
+        params_rel["notif_scaling_factor"] = 999.0
+        params_rel["notif_relative_scale"] = relative_scale
+
+        cases_abs, beam_abs = sim._apply_observation_model(
+            infec, params_abs, np.random.default_rng(123)
+        )
+        cases_rel, beam_rel = sim._apply_observation_model(
+            infec,
+            params_rel,
+            np.random.default_rng(123),
+            population_size=pop,
+            reference_population_size=ref_pop,
+        )
+
+        np.testing.assert_array_equal(cases_abs, cases_rel)
+        pd.testing.assert_frame_equal(beam_abs, beam_rel)
+
+    def test_relative_scaling_overrides_notif_scaling_factor(self, sim, params):
+        """When notif_relative_scale is present, notif_scaling_factor is ignored."""
+        infec = np.full((sim.config.num_simulations, sim.config.num_time_steps), 10.0)
+        pop = int(2e5)
+        ref_pop = int(1e5)
+        relative_scale = 0.25
+
+        params_with_relative = params.copy()
+        params_with_relative["notif_scaling_factor"] = 10.0
+        params_with_relative["notif_relative_scale"] = relative_scale
+
+        params_effective = params.copy()
+        params_effective["notif_scaling_factor"] = relative_scale * pop / ref_pop
+
+        cases_rel, _ = sim._apply_observation_model(
+            infec,
+            params_with_relative,
+            np.random.default_rng(77),
+            population_size=pop,
+            reference_population_size=ref_pop,
+        )
+        cases_effective, _ = sim._apply_observation_model(
+            infec,
+            params_effective,
+            np.random.default_rng(77),
+        )
+
+        np.testing.assert_array_equal(cases_rel, cases_effective)
+
+    def test_relative_scaling_requires_population_size(self, sim, params):
+        infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
+        params["notif_relative_scale"] = 1.0
+
+        with pytest.raises(ValueError, match="population_size must be provided"):
+            sim._apply_observation_model(
+                infec,
+                params,
+                np.random.default_rng(0),
+                population_size=None,
+            )
+
+    def test_relative_scaling_with_zero_population_gives_zero_cases(self, sim, params):
+        infec = np.full((sim.config.num_simulations, sim.config.num_time_steps), 100.0)
+        params["notif_relative_scale"] = 1.0
+
+        cases_vec, _ = sim._apply_observation_model(
+            infec,
+            params,
+            np.random.default_rng(0),
+            population_size=0,
+            reference_population_size=int(1e5),
+        )
+
+        assert_allclose(cases_vec, 0)
+
 
 # ---------------------------------------------------------------------------
 # TestRun — integration
