@@ -574,7 +574,8 @@ class TestRun:
         obs = pd.Series(np.ones(num_steps, dtype=float), index=all_timestamps)
         out = sim_cal.run(params, initial, observations_sr=obs)
         # Only the 3 timestamps inside [calibration_start, calibration_end] are scored
-        assert out.scoring.wis_array.shape == (num_sim, 3)
+        # assert out.scoring.wis_array.shape == (num_sim, 3)
+        assert out.scoring.summary["wis"].shape == (num_sim,)
 
     # --- Validation errors ---
 

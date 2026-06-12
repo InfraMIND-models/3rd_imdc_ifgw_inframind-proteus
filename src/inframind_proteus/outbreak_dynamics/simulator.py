@@ -182,8 +182,21 @@ class SimulationScoring:
         Data frame shape is ``(num_simulations, num_scores)``,
         where ``num_scores`` is the number of calculated scores.
     """
-    wis_array: np.ndarray
+    # wis_array: np.ndarray  # Deprecated. Removed to save RAM.
     summary: pd.DataFrame
+
+    @classmethod
+    def concat(
+            cls, objs: list[SimulationScoring]
+    ) -> SimulationScoring:
+        """Concatenate multiple SimulationScoring instances into one, joining
+        through all simulations.
+
+        """
+        return cls(
+            # wis_array=np.concatenate([o.wis_array for o in objs], axis=0),
+            summary=pd.concat([o.summary for o in objs], axis=0),
+        )
 
 
 @dataclass
@@ -214,10 +227,18 @@ class SimulationOutput:
     config: SimulationConfig
 
     @classmethod
-    def concat(cls, objs: list[SimulationOutput]) -> SimulationOutput:
+    def concat(
+            cls,
+            objs: list[SimulationOutput],
+    ) -> SimulationOutput:
         """Concatenate multiple SimulationOutput instances into one.
 
         This is useful for combining results from sequential chunk runs.
+
+        NOTE: This method does not modify the simulation indices. This means
+        that if the input SimulationOutput instances have overlapping simulation indices,
+        the resulting concatenated SimulationOutput will also do, possibly leading
+        to errors later.
 
         Returns
         -------
@@ -228,8 +249,9 @@ class SimulationOutput:
             infec_df=pd.concat([o.infec_df for o in objs], axis=0),
             cases_df=pd.concat([o.cases_df for o in objs], axis=0),
             case_beam_df=pd.concat([o.case_beam_df for o in objs], axis=0),
-            # scoring=
-            scoring=objs[0].scoring,  # TODO: IMPLEMENT CONCATENATION ON SCORING AND REPLACE THIS
+            scoring=SimulationScoring.concat(
+                [o.scoring for o in objs if o.scoring is not None]
+            ),
             config=objs[0].config,  # Assumes all outputs share the same config
         )
 
@@ -476,8 +498,17 @@ class RenewalSimulator:
             for i in _iter_factory()
         ]
 
-        raise NotImplementedError()  # To be continued...
-        # self.run()
+        results: list[SimulationOutput] = list()
+        for params_chunk, infec_chunk in zip(params_df_chunks, initial_infec_df_chunks):
+            results.append(
+                self.run(
+                    params_df=params_chunk,
+                    initial_infec_df=infec_chunk,
+                    observations_sr=observations_sr,
+                )
+            )
+
+        return SimulationOutput.concat(results)
 
     def build_initial_infec_df(self) -> pd.DataFrame:
         """Build the warm-up infection matrix using the config settings."""
@@ -658,6 +689,8 @@ class RenewalSimulator:
             ``cfg.temporal.calibration_end`` to define the scoring window.
         observations_sr:
             Observed case counts indexed by timestamp.
+        params_df:
+            Data frame with parameters for the simulations, one per row.
 
         Returns
         -------
@@ -699,7 +732,9 @@ class RenewalSimulator:
         simulations_df = case_beam_df[obs_cal.index]
         simulations_median_df = simulations_df.xs(0.5, level="quantile")
         summary_df = pd.DataFrame(
-            {}, index=simulations_df.index.get_level_values("i_simulation").unique()
+            {},
+            # index=simulations_df.index.get_level_values("i_simulation").unique(),
+            index=params_df.index,
         )
         # ^ Shape: summary_df[i_simulation, score_name] = summary score scalar value
         # Expects that `simulations_df` is sorted by `i_simulation`.
@@ -727,7 +762,7 @@ class RenewalSimulator:
         )
 
         scoring = SimulationScoring(
-            wis_array=wis_array,
+            # wis_array=wis_array,
             summary=summary_df,
         )
 
