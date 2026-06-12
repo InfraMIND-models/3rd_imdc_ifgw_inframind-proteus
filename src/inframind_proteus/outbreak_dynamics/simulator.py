@@ -20,6 +20,7 @@ Output is returned as a :class:`SimulationOutput` dataclass.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -212,6 +213,26 @@ class SimulationOutput:
     scoring: SimulationScoring | None
     config: SimulationConfig
 
+    @classmethod
+    def concat(cls, objs: list[SimulationOutput]) -> SimulationOutput:
+        """Concatenate multiple SimulationOutput instances into one.
+
+        This is useful for combining results from sequential chunk runs.
+
+        Returns
+        -------
+        SimulationOutput
+            A new instance with concatenated data frames and arrays.
+        """
+        return cls(
+            infec_df=pd.concat([o.infec_df for o in objs], axis=0),
+            cases_df=pd.concat([o.cases_df for o in objs], axis=0),
+            case_beam_df=pd.concat([o.case_beam_df for o in objs], axis=0),
+            # scoring=
+            scoring=objs[0].scoring,  # TODO: IMPLEMENT CONCATENATION ON SCORING AND REPLACE THIS
+            config=objs[0].config,  # Assumes all outputs share the same config
+        )
+
 
 # ---------------------------------------------------------------------------
 # Simulator
@@ -285,7 +306,8 @@ class RenewalSimulator:
         SimulationOutput
         """
         cfg = self.config
-        num_sim = cfg.num_simulations
+        # num_sim = cfg.num_simulations  # OLD.
+        num_sim = params_df.shape[0]  # Infer from params_df
         num_steps = cfg.num_time_steps
         gt_steps = self._gt_max_steps
         step_dt = self._step_dt
@@ -297,10 +319,20 @@ class RenewalSimulator:
             raise ValueError(
                 f"params_df has {params_df.shape[0]} rows; expected {num_sim}"
             )
+        # if num_sim != cfg.num_simulations:
+        #     warnings.warn(
+        #         "Number of rows in `params_df` does not match "
+        #         "config.num_simulations. Will run the number on params_df."
+        #     )
         if initial_infec_df.shape != (num_sim, gt_steps):
             raise ValueError(
                 f"initial_infec_df must have shape ({num_sim}, {gt_steps}); "
                 f"got {initial_infec_df.shape}"
+            )
+        # if not params_df.index.isin(initial_infec_df.index).all():  # contains
+        if not (initial_infec_df.index == params_df.index).all():  # exact match
+            raise ValueError(
+                "Indices of initial_infec_df and params_df must match exactly"
             )
         if cfg.mode == "calibration" and observations_sr is None:
             raise ValueError("observations_sr is required in calibration mode")
@@ -313,7 +345,7 @@ class RenewalSimulator:
                 "set when mode='calibration'"
             )
 
-        _params = params_df.copy()
+        _params: pd.DataFrame = params_df.copy()
 
         # Fill config-default observation params when not in params_df
         # NOTE: Disabled since we want to enforce presence of these parameters.
@@ -391,11 +423,13 @@ class RenewalSimulator:
         )
 
         infec_df = pd.DataFrame(infec_sim, columns=sim_timestamps)
-        infec_df.index.name = "i_simulation"
+        # infec_df.index.name = "i_simulation"
+        infec_df.index = _params.index
         infec_df.columns.name = "t"
 
         cases_df = pd.DataFrame(cases_vec, columns=sim_timestamps)
-        cases_df.index.name = "i_simulation"
+        # cases_df.index.name = "i_simulation"
+        cases_df.index = _params.index
         cases_df.columns.name = "t"
 
         case_beam_df.columns = sim_timestamps
@@ -421,6 +455,29 @@ class RenewalSimulator:
             scoring=scoring,
             config=cfg,
         )
+
+    def run_sequential_chunks(
+            self,
+            params_df: pd.DataFrame,
+            initial_infec_df: pd.DataFrame,
+            observations_sr: pd.Series | None = None,
+            max_chunk_size: int = 10000,
+    ):
+        """"""
+
+        _iter_factory = lambda: range(0, params_df.shape[0], max_chunk_size)
+
+        params_df_chunks = [
+            params_df.iloc[i:i + max_chunk_size]
+            for i in _iter_factory()
+        ]
+        initial_infec_df_chunks = [
+            initial_infec_df.iloc[i:i + max_chunk_size]
+            for i in _iter_factory()
+        ]
+
+        raise NotImplementedError()  # To be continued...
+        # self.run()
 
     def build_initial_infec_df(self) -> pd.DataFrame:
         """Build the warm-up infection matrix using the config settings."""
@@ -563,10 +620,12 @@ class RenewalSimulator:
         # Deterministic quantile beam via Cornish-Fisher approximation
         beam_frames = [
             pd.DataFrame(
-                nbinom_ppf_cf(q=q, n=overdisp, p=p, continuity=False)
+                nbinom_ppf_cf(q=q, n=overdisp, p=p, continuity=False),
+                index=params_df.index,
             )
             for q in self.config.case_beam_quantiles
         ]
+
         case_beam_df = pd.concat(
             beam_frames,
             keys=self.config.case_beam_quantiles,
@@ -660,12 +719,12 @@ class RenewalSimulator:
         )
         summary_df["rmse"] = rmse_array
 
-        # # Negative-binomial loglikelihood (TEMPORARILY DISABLED)
-        # summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
-        #     simulations_df=simulations_median_df,
-        #     observations_sr=observations_sr,
-        #     overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
-        # )
+        # Negative-binomial loglikelihood (TEMPORARILY DISABLED)
+        summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
+            simulations_df=simulations_median_df,
+            observations_sr=observations_sr,
+            overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
+        )
 
         scoring = SimulationScoring(
             wis_array=wis_array,

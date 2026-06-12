@@ -457,6 +457,19 @@ class TestRun:
             np.ones((sim.config.num_simulations, gt_steps))
         )
 
+    @pytest.fixture
+    def obs(self, sim):
+        cfg = sim.config
+        timestamps = pd.date_range(
+            start=cfg.temporal.sim_start,
+            periods=cfg.num_time_steps,
+            freq=pd.tseries.offsets.Day(cfg.temporal.step_dt),
+        )
+        return pd.Series(
+            np.arange(1, cfg.num_time_steps + 1, dtype=float),
+            index=timestamps
+        )
+
     # --- Output type and shapes ---
 
     def test_returns_simulation_output(self, sim, params, initial_infec):
@@ -565,10 +578,11 @@ class TestRun:
 
     # --- Validation errors ---
 
-    def test_validation_wrong_params_rows(self, sim, initial_infec):
-        wrong_params = make_params_df(sim.config.num_simulations + 5)
-        with pytest.raises(ValueError, match="params_df"):
-            sim.run(wrong_params, initial_infec)
+    # # Deprecated test: Now it simulates the number in `params_df`
+    # def test_validation_wrong_params_rows(self, sim, initial_infec):
+    #     wrong_params = make_params_df(sim.config.num_simulations + 5)
+    #     with pytest.raises(ValueError, match="params_df"):
+    #         sim.run(wrong_params, initial_infec)
 
     def test_validation_wrong_initial_infec_shape(self, sim, params):
         bad_initial = pd.DataFrame(
@@ -715,6 +729,51 @@ class TestRun:
 
         # The infection arrays should be identical (same effective R(t))
         assert_allclose(out_a.infec_df.values, out_b.infec_df.values, rtol=1e-10)
+
+    def test_custom_simulation_index_in_params_df(
+            self, sim, params, initial_infec, obs
+    ):
+        """Test running the simulations with a custom index of `i_simulation`
+        given as `params_df`. All other indices, and the number of simulations,
+        should follow along.
+        """
+        print(params.index)
+        # Modify params df and give it a weird index
+        params = pd.concat([params, params], axis=0)
+        _start = 10
+        _step = 2
+        _num = params.shape[0]
+        custom_index = pd.RangeIndex(_start, _start + _num * _step, _step)
+        params.index = custom_index
+
+        # Try running with mismatching shapes of initial_infec
+        with pytest.raises(ValueError, match="must have shape"):
+            sim.run(
+                params,
+                initial_infec,
+                obs
+            )
+
+        # Fix the shape of initial infec and rerun
+        initial_infec = pd.concat([initial_infec, initial_infec], axis=0)
+        initial_infec.index = custom_index
+        results = sim.run(
+            params,
+            initial_infec,
+            obs
+        )
+
+        # Check output shapes and index values
+        if results.infec_df is not None:
+            assert results.infec_df.shape[0] == _num
+            assert (results.infec_df.index == params.index).all()
+
+        if results.case_beam_df is not None:
+            _unique_vals = results.case_beam_df.index.get_level_values("i_simulation").unique()
+            assert (_unique_vals.shape[0] == _num)
+            assert (set(_unique_vals) == set(params.index))
+
+
 
 
 # ---------------------------------------------------------------------------
