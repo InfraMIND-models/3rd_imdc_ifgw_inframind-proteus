@@ -90,7 +90,7 @@ scoring:
 
 # ----------------------------------------------------------------------------
 output:
-  output_dir: "outputs/outbreak_dynamics_example"
+  main_dir: "outputs/outbreak_dynamics_example"
   save_infec_trajectories: false
   save_cases_trajectories: true
   save_case_beam: true

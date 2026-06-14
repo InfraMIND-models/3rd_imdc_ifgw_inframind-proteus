@@ -7,8 +7,8 @@
 
 simulation:
   mode: calibration            # "calibration" | "projection"
-  num_simulations: 1000
-  num_time_steps: 61           # steps after the warm-up window
+  num_simulations: 262144 # 1024
+  num_time_steps: 68           # steps after the warm-up window
   gt_max: 49                   # maximum generation time (days)
   rng_seed: 123
 
@@ -62,10 +62,10 @@ sampling:
     # --- Enveloped logistic model
     rt_logist_r_high: [1.05, 4.5]
     rt_logist_start: [-30, 200]
-#    notif_relative_scale: [0.1, 50.0]
-#    rt_logist_dt_end:  [50, 360]
-#    rt_logist_dt_center:  [10, 150]
-#    rt_logist_w_center:   [0.5, 15.]
+    notif_relative_scale: [0.1, 50.0]
+    rt_logist_dt_end:  [50, 360]
+    rt_logist_dt_center:  [10, 150]
+    rt_logist_w_center:   [0.5, 15.]
 
 
   # Scale specification: "linear" (default) or "log"
@@ -94,8 +94,8 @@ scoring:
 
 # ----------------------------------------------------------------------------
 output:
-  output_dir: "outputs/outbreak_dynamics_example"
+  main_dir: "outputs/prototype_run_dynamic_model"
   save_infec_trajectories: false
-  save_cases_trajectories: true
+  save_cases_trajectories: false
   save_case_beam: true
   save_scores: true          # written only in calibration mode

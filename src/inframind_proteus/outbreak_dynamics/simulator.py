@@ -859,6 +859,8 @@ class RenewalSimulator:
             )
         ]
 
+        population_size = sim_cfg.get("population_size", defaults.population_size)
+
         config = SimulationConfig(
             mode=mode,
             num_simulations=int(sim_cfg.get("num_simulations", defaults.num_simulations)),
@@ -899,6 +901,7 @@ class RenewalSimulator:
             sampling=sampling_cfg,
             initial_infections=initial_infections_cfg,
             rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),
+            population_size=population_size,
         )
 
         return cls(rt_model=rt_model, gt_model=gt_model, config=config)
