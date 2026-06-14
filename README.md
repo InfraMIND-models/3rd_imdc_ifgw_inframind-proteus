@@ -2,6 +2,11 @@
 
 InfraMIND Proteus is the first model of the InfraMIND (Infrastructure for Modeling Infectious Diseases) family, specifically developed for the 3rd edition of the [Infodengue-Mosqlimate Dengue Challenge](https://sprint.mosqlimate.org/) (IMDC).
 
+## Team and contributors
+
+- Paulo Cesar Ventura (IFGW-UNICAMP, Brazil)
+- Alberto Aleta (BIFI-Unizar, Spain)
+- Marco Fernandez (BIFI-Unizar, Spain)
 
 # Quick start
 
