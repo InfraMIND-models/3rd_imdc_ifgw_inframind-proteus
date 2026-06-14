@@ -1420,24 +1420,20 @@ name = "inframind-proteus"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "dvc" },
+    { name = "dvc-ssh" },
     { name = "epiweeks" },
     { name = "jupyter" },
+    { name = "matplotlib" },
     { name = "mosqlient" },
+    { name = "numba" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "plotly" },
     { name = "python-dotenv" },
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "statsmodels" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "dvc" },
-    { name = "dvc-ssh" },
-    { name = "matplotlib" },
-    { name = "numba" },
-    { name = "plotly" },
 ]
 
 [package.dev-dependencies]
@@ -1449,16 +1445,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dvc", marker = "extra == 'dev'", specifier = ">=3.59" },
-    { name = "dvc-ssh", marker = "extra == 'dev'" },
+    { name = "dvc", specifier = ">=3.59" },
+    { name = "dvc-ssh" },
     { name = "epiweeks", specifier = ">=2.3.0" },
     { name = "jupyter", specifier = ">=1.0.0" },
-    { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.9.4" },
+    { name = "matplotlib", specifier = ">=3.9.4" },
     { name = "mosqlient", specifier = ">=2.1.2" },
-    { name = "numba", marker = "extra == 'dev'", specifier = ">=0.63.1" },
+    { name = "numba", specifier = ">=0.63.1" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "pandas", specifier = ">=2.3.3" },
-    { name = "plotly", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "plotly", specifier = ">=6.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "scipy", specifier = ">=1.16.3" },
