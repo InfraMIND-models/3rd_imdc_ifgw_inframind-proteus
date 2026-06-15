@@ -151,6 +151,70 @@ def apply_include_exclude_logic(
     return use_locs
 
 
+def map_parallel_or_sequential(
+        task, *contents, ncpus=1, chunksize=1, pool=None
+):
+    """
+    Apply a function (task) to a sequence of input parameters (contents),
+    using either a sequential loop (if ncpus=1) or a pool of
+    concurrent processes.
+    Alternatively, for running in a pool of processes, a previously
+    created pool can be informed, in which case ncpus is
+    ignored.
+
+    If `chunksize` > 1 and `ncpus` > 1, the parallel processes will be split
+    into chunks of sequential execution, potentially reducing overhead
+    costs of copying the data into subprocesses. For tasks that receive
+    heavy data payloads, you can play with both `ncpus` and `chunksize`
+    to achieve optimal performance.
+
+    This function uses the `pathos` library to run processes in parallel.
+
+    Parameters
+    ----------
+    task : callable
+        A function to map on input contents.
+    contents : iterable or multiple iterables
+        Iterables containing sequences of inputs.
+        Each argument must be an iterable or sequence of input arguments,
+        which will then be passed to `task` in the same order as they are
+        informed. If the iterables don't match in size, the size of the
+        shortest one will be considered.
+    ncpus : int
+        Number of concurrent processes. If ncpus=1 (default), a simple for loop is used. If greater than 1, a process
+        pool is created. If parameter `pool` is informed, ncpus is ignored.
+    chunksize : int
+        Size of each sequential chunk of execution.
+    pool : Any
+        A pathos process pool previously created. Overrides parameter 'ncpus' if informed.
+
+    Returns
+    -------
+    results : list
+        A list of results from applying `task` to all input items.
+    """
+    if chunksize > 1 and (ncpus > 1 or pool is not None):
+        # --- Run parallel with chunking
+        return map_parallel_or_sequential_chunks(
+            task, *contents,
+            ncpus=ncpus, chunksize=chunksize, pool=pool
+        )
+
+    if ncpus == 1 and pool is None:
+        # --- Run sequentially
+        results = list()
+        for item in zip(*contents):
+            results.append(task(*item))
+
+        return results
+
+    if pool is None:
+        pool = ProcessPool(ncpus=ncpus)
+
+    # --- Run non-chunked parallel
+    return pool.map(task, *contents)
+
+
 def map_parallel_or_sequential_chunks(
         task, *contents, ncpus=1, chunksize=1, pool=None
 ):
