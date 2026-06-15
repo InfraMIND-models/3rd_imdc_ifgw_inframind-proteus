@@ -61,8 +61,8 @@ sampling:
 
     # --- Enveloped logistic model
     rt_logist_r_high: [1.05, 4.5]
-    rt_logist_start: [-30, 200]
-    notif_relative_scale: [0.1, 50.0]
+    rt_logist_start: [-40, 200]
+    notif_relative_scale: [0.05, 50.0]
     rt_logist_dt_end:  [50, 360]
     rt_logist_dt_center:  [10, 150]
     rt_logist_w_center:   [0.5, 15.]
@@ -71,7 +71,7 @@ sampling:
   # Scale specification: "linear" (default) or "log"
   # Unspecified parameters default to linear scale.
   param_scales:
-    notif_scaling_factor: log
+#    notif_scaling_factor: log
 #    notif_nb_overdispersion: inverse
 
 # ----------------------------------------------------------------------------

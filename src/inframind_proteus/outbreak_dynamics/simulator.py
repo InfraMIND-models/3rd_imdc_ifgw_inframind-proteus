@@ -754,7 +754,7 @@ class RenewalSimulator:
         )
         summary_df["rmse"] = rmse_array
 
-        # Negative-binomial loglikelihood (TEMPORARILY DISABLED)
+        # Negative-binomial loglikelihood (MAY BE TEMPORARILY DISABLED)
         summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
             simulations_df=simulations_median_df,
             observations_sr=observations_sr,
