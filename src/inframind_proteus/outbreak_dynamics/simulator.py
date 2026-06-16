@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal, Any
 
 import numba as nb
@@ -40,7 +41,7 @@ from .rt_models import BaseRT, LogisticRT, get_rt_model
 from .sampling import SamplingConfig, parse_calibration_sampling_config
 from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized, \
     coverages_vectorized
-from .utils import parse_timestamp
+from .utils import parse_timestamp, save_yaml_dict
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +136,18 @@ class ScoringConfig:
         default_factory=lambda: [0.025, 0.25, 0.5, 0.75, 0.975]
     )
 
+@dataclass
+class OutputConfig:
+    """Output/export configuration.
+
+    Attributes
+    ----------
+    main_dir:
+        Main output directory under which all results will be saved.
+    """
+
+    main_dir: Path = Path("outputs/_DEFAULT")
+
 
 @dataclass
 class SimulationConfig:
@@ -198,6 +211,7 @@ class SimulationConfig:
     initial_infections: InitialInfectionsConfig = field(
         default_factory=InitialInfectionsConfig
     )
+    output: OutputConfig = field(default_factory=OutputConfig)
     rng_seed: int = 0
 
 
@@ -293,6 +307,44 @@ class SimulationOutput:
             ),
             config=objs[0].config,  # Assumes all outputs share the same config
         )
+
+    def save(
+            self,
+            subdir_name="simulation",
+            root_dir: Path | str = Path("."),
+    ):
+        """Save/export all eligible data structures to files.
+
+        Follows the directives in config.output
+        """
+        cfg = self.config
+        out_cfg = cfg.output
+        root_dir = Path(root_dir)
+
+        # TODO: Continue this function, formalize exporting procedures.
+        raise NotImplementedError
+
+        out_main_dir = out_cfg.main_dir
+        out_dir = out_main_dir / subdir_name
+
+        # out_dir = _root / Path(config_dict["output"]["main_dir"]) / "calibration_results" / f"{location_id}_{year}"
+        out_dir.mkdir(exist_ok=True, parents=True)
+
+        # save_yaml_dict(config_dict, out_dir / "config.yaml")
+
+        # params_df.to_csv(out_dir / "params.csv.gz")  # Also kinda heavy!
+
+        # results.scoring.summary.to_parquet(out_dir / "scoring.parquet")
+        self.scoring.summary.to_csv(out_dir / "scoring.csv.gz")
+
+        # results.case_beam_df.to_csv(out_dir / "case_beam_df.csv")  # TOOOOOOOOO heavy!
+
+        # # Export only selected trajectories (case beams) to save space
+        # self.case_beam_df.reset_index().set_index("i_simulation").loc[selected_wis_sr.index].to_csv(
+        #     out_dir / "case_beam_selected_df.csv.gz")
+        # print(f"Done: {out_dir}")
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -853,6 +905,7 @@ class RenewalSimulator:
         gt_cfg = config_dict.get("generation_time", {}) or {}
         sampling_cfg = parse_calibration_sampling_config(config_dict)
         initial_infections_cfg = parse_initial_infections_config(config_dict)
+        output_cfg = config_dict.get("output", {}) or {}
 
         rt_model_name = str(rt_cfg.get("model", "logistic")).strip().lower()
         rt_model = get_rt_model(rt_model_name)
@@ -948,6 +1001,10 @@ class RenewalSimulator:
             )
         )
 
+        # Output config
+        out_main_dir = Path(output_cfg.get("main_dir", defaults.output.main_dir))
+
+
         config = SimulationConfig(
             mode=mode,
             num_simulations=int(sim_cfg.get("num_simulations", defaults.num_simulations)),
@@ -977,6 +1034,9 @@ class RenewalSimulator:
                 case_beam_quantiles=case_beam_quantiles,
             ),
             sampling=sampling_cfg,
+            output=OutputConfig(
+                main_dir=out_main_dir,
+            ),
             initial_infections=initial_infections_cfg,
             rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),
         )

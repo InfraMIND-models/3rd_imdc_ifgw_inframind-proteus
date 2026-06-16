@@ -109,6 +109,7 @@ scoring:
 # ----------------------------------------------------------------------------
 output:
   main_dir: "outputs/prototype_run_dynamic_model"
+
   save_infec_trajectories: false
   save_cases_trajectories: false
   save_case_beam: true

@@ -49,6 +49,7 @@ reproduction_number:
     rt_logist_width:  20.0       # steepness (days); larger = smoother
     rt_logist_rmin:   0.2        # asymptotic minimum R during outbreak
     rt_logist_rmax:   1.6        # peak R ("R0"-like)
+    rt_logist_r_off:     0.881221
 
 # ----------------------------------------------------------------------------
 sampling:
