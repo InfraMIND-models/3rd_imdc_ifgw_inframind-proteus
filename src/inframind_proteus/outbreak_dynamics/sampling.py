@@ -32,6 +32,19 @@ class NormalPrior(PriorDistribution):
         return scipy.stats.norm.ppf(x, loc=self.mean, scale=self.std)
 
 
+class GammaPrior(PriorDistribution):
+    def __init__(self, mean: float, std: float):
+        self.mean = mean
+        self.std = std
+        # Convert mean and std to shape and scale parameters for scipy's gamma distribution
+        self.shape = (self.mean / self.std) ** 2
+        self.scale = self.std ** 2 / self.mean
+
+    def scale_from_unit_interval(self, x: np.ndarray) -> np.ndarray:
+        """Scale a value from the unit interval [0, 1] to the gamma distribution's support."""
+        return scipy.stats.gamma.ppf(x, a=self.shape, scale=self.scale)
+
+
 def get_prior_distribution(prior_cfg: dict) -> PriorDistribution:
 
     dist_name = prior_cfg["distribution"]
@@ -39,6 +52,7 @@ def get_prior_distribution(prior_cfg: dict) -> PriorDistribution:
 
     cls_dict = {
         "normal": NormalPrior,
+        "gamma": GammaPrior,
         # Add more distributions here as needed
     }
 
@@ -86,7 +100,7 @@ class SamplingConfig:
     rng_seed: int | None = None
     param_ranges: dict[str, list[float]] = field(default_factory=dict)
     param_scales: dict[str, str] = field(default_factory=dict)
-    param_priors: dict[str, PriorModel] = field(default_factory=dict)
+    param_priors: dict[str, PriorDistribution] = field(default_factory=dict)
     rt_params: dict[str, float] = field(default_factory=dict)
     observation_params: dict[str, float] = field(default_factory=dict)
 
@@ -150,23 +164,110 @@ def _get_scaled_bounds(
 
 
 
-def _transform_sampled_parameters(
-        lhs_scaled: np.ndarray,
-        param_scales: dict[str, str],
-        param_names: list[str],
-):
+# def _transform_sampled_parameters(
+#         lhs_scaled: np.ndarray,
+#         param_scales: dict[str, str],
+#         param_names: list[str],
+# ):
+#     """
+#     Apply non-linear scaling transformations to the sampled parameters in-place.
+#     """
+#     for i, param_name in enumerate(param_names):
+#         scale = param_scales.get(param_name, "linear").lower()
+#
+#         # Apply exponential transformation for log-scale parameters
+#         if scale == "log":
+#             lhs_scaled[:, i] = np.exp(lhs_scaled[:, i])
+#
+#         if scale == "inverse":
+#             lhs_scaled[:, i] = 1.0 / lhs_scaled[:, i]
+
+
+def _scale_params_with_priors(
+    samples: np.ndarray,
+    param_ranges: dict[str, list[float]],
+    param_scales: dict[str, str],
+    param_priors: dict[str, PriorDistribution],
+    param_names: list[str],
+) -> np.ndarray:
+    """Scale samples from [0, 1] to parameter space using ranges, scales, or priors.
+
+    For each parameter:
+    - If a prior distribution is defined, use it to transform from [0, 1].
+    - Otherwise, use param_ranges and param_scales (traditional bounds + scaling).
+
+    Parameters
+    ----------
+    samples:
+        Array of shape (n_samples, n_params) with values in [0, 1].
+    param_ranges:
+        Mapping from parameter name to [lower_bound, upper_bound].
+    param_scales:
+        Mapping from parameter name to scale type ('linear', 'log', 'inverse').
+    param_priors:
+        Mapping from parameter name to PriorDistribution instance.
+    param_names:
+        List of parameter names (order must match columns in samples).
+
+    Returns
+    -------
+    np.ndarray
+        Scaled samples in parameter space, same shape as input.
     """
-    Apply non-linear scaling transformations to the sampled parameters in-place.
-    """
+    scaled = np.copy(samples)
+
     for i, param_name in enumerate(param_names):
-        scale = param_scales.get(param_name, "linear").lower()
+        # Use prior distribution if available
+        if param_name in param_priors:
+            # Apply the prior PPF to scale from [0, 1] to the distribution's support
+            prior = param_priors[param_name]
+            scaled[:, i] = prior.scale_from_unit_interval(samples[:, i])
 
-        # Apply exponential transformation for log-scale parameters
-        if scale == "log":
-            lhs_scaled[:, i] = np.exp(lhs_scaled[:, i])
+            # Priors are STILL bounded by param_ranges - they are clipped
+            scaled[:, i] = np.clip(
+                scaled[:, i],
+                param_ranges[param_name][0],
+                param_ranges[param_name][1]
+            )
 
-        if scale == "inverse":
-            lhs_scaled[:, i] = 1.0 / lhs_scaled[:, i]
+        # Otherwise use bounds and scale transformation
+        else:
+            bounds = param_ranges[param_name]
+            scale = param_scales.get(param_name, "linear").lower()
+
+            if scale == "log":
+                if bounds[0] <= 0 or bounds[1] <= 0:
+                    raise ValueError(
+                        f"Log-scale parameter {param_name!r} must have positive bounds, "
+                        f"got {bounds}"
+                    )
+                # Scale in log space then exponentiate
+                log_lo = np.log(bounds[0])
+                log_hi = np.log(bounds[1])
+                scaled[:, i] = np.exp(samples[:, i] * (log_hi - log_lo) + log_lo)
+
+            elif scale == "inverse":
+                if bounds[0] * bounds[1] <= 0:
+                    raise ValueError(
+                        f"Inverse-scale parameter {param_name!r} bounds must be both "
+                        f"positive or negative, excluding zero, got {bounds}"
+                    )
+                # Scale in inverse space then invert back
+                inv_lo = 1.0 / bounds[1]  # Note: inverse swaps order
+                inv_hi = 1.0 / bounds[0]
+                scaled[:, i] = 1.0 / (samples[:, i] * (inv_hi - inv_lo) + inv_lo)
+
+            elif scale == "linear":
+                # Standard linear scaling
+                scaled[:, i] = samples[:, i] * (bounds[1] - bounds[0]) + bounds[0]
+
+            else:
+                raise ValueError(
+                    f"Unsupported scale for parameter {param_name!r}: {scale!r}. "
+                    "Supported scales: 'linear', 'log', 'inverse'"
+                )
+
+    return scaled
 
 
 def sample_lhs(
@@ -188,10 +289,13 @@ def sample_lhs(
         NumPy random generator instance.
     param_scales:
         Mapping from parameter name to scale type. Supported values:
-        ``"linear"`` (default) or ``"log"`` (logarithmic).
+        ``"linear"`` (default), ``"log"`` (logarithmic), or ``"inverse"``.
         For log-scale parameters, the bounds are interpreted as linear values,
         but sampling occurs in log-space: samples are drawn uniformly from
         ``[log(lower), log(upper)]`` and then exponentiated.
+    param_priors:
+        Mapping from parameter name to PriorDistribution instance.
+        If provided for a parameter, it takes precedence over param_scales.
 
     Returns
     -------
@@ -203,19 +307,18 @@ def sample_lhs(
     param_priors = param_priors or {}
     param_names = list(param_ranges.keys())
 
-    l_bounds, u_bounds = _get_scaled_bounds(
-        param_ranges=param_ranges,
-        param_scales=param_scales,
-        param_names=param_names,
-    )
-
     lhs_sampler = scipy.stats.qmc.LatinHypercube(d=len(param_ranges), rng=rng)
     lhs_samples = lhs_sampler.random(n=num_simulations)
 
-    # Scale to bounds (in potentially transformed space)
-    # _scale_params_with_priors()  # TODO: Define and implement
-    lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
-    _transform_sampled_parameters(lhs_scaled, param_scales, param_names)
+    # Scale from [0, 1] to parameter space using priors or bounds+scales
+    lhs_scaled = _scale_params_with_priors(
+        samples=lhs_samples,
+        param_ranges=param_ranges,
+        param_scales=param_scales,
+        param_priors=param_priors,
+        param_names=param_names,
+    )
+
 
     return pd.DataFrame(lhs_scaled, columns=param_names)
 
@@ -225,6 +328,7 @@ def sample_sobol(
     num_simulations: int,
     rng: Generator,
     param_scales: dict[str, str] | None = None,
+    param_priors: dict[str, PriorDistribution] | None = None,
 ) -> pd.DataFrame:
     """Draw a Sobol sequence sample scaled to the given parameter ranges.
 
@@ -238,10 +342,13 @@ def sample_sobol(
         NumPy random generator instance.
     param_scales:
         Mapping from parameter name to scale type. Supported values:
-        ``"linear"`` (default) or ``"log"`` (logarithmic).
+        ``"linear"`` (default), ``"log"`` (logarithmic), or ``"inverse"``.
         For log-scale parameters, the bounds are interpreted as linear values,
         but sampling occurs in log-space: samples are drawn uniformly from
         ``[log(lower), log(upper)]`` and then exponentiated.
+    param_priors:
+        Mapping from parameter name to PriorDistribution instance.
+        If provided for a parameter, it takes precedence over param_scales.
 
     Returns
     -------
@@ -250,20 +357,21 @@ def sample_sobol(
         parameter names.
     """
     param_scales = param_scales or {}
+    param_priors = param_priors or {}
     param_names = list(param_ranges.keys())
-
-    l_bounds, u_bounds = _get_scaled_bounds(
-        param_ranges=param_ranges,
-        param_scales=param_scales,
-        param_names=param_names,
-    )
 
     sampler = scipy.stats.qmc.Sobol(d=len(param_ranges), rng=rng)
     samples = sampler.random(n=num_simulations)
 
-    # Scale to bounds (in potentially transformed space)
-    scaled_samples = scipy.stats.qmc.scale(samples, l_bounds, u_bounds)
-    _transform_sampled_parameters(scaled_samples, param_scales, param_names)
+    # Scale from [0, 1] to parameter space using priors or bounds+scales
+    scaled_samples = _scale_params_with_priors(
+        samples=samples,
+        param_ranges=param_ranges,
+        param_scales=param_scales,
+        param_priors=param_priors,
+        param_names=param_names,
+    )
+
 
     return pd.DataFrame(scaled_samples, columns=param_names)
 
@@ -407,6 +515,7 @@ def build_calibration_params_df(
                 num_simulations=num_simulations,
                 rng=rng,
                 param_scales=sampling_config.param_scales,
+                param_priors=sampling_config.param_priors,
             )
 
         elif sampling_config.method == "sobol":
@@ -415,6 +524,7 @@ def build_calibration_params_df(
                 num_simulations=num_simulations,
                 rng=rng,
                 param_scales=sampling_config.param_scales,
+                param_priors=sampling_config.param_priors,
             )
 
         elif sampling_config.method == "given":

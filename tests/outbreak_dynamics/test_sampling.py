@@ -343,7 +343,7 @@ class TestBuildCalibrationParamsDf:
         pd.testing.assert_frame_equal(out1, out2)
 
     def test_selects_sobol_sampler_when_method_is_sobol(self, monkeypatch):
-        def _stub_sample_sobol(param_ranges, num_simulations, rng, param_scales=None):
+        def _stub_sample_sobol(param_ranges, num_simulations, rng, param_scales=None, param_priors=None):
             return pd.DataFrame({"x": np.full(num_simulations, 0.5)})
 
         def _raise_if_lhs_called(*args, **kwargs):
