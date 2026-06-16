@@ -82,10 +82,53 @@ class LocationConfig:
         ``"macrorregional_geocode"``, ``"uf_code"``.
     location_id:
         Value of the location identifier.
+    population_size:
+        Population size for the simulated location. Required if using relative
+        scaling scheme for the observation model.
     """
 
     location_id_variable: str
     location_id: str | int
+    population_size: int = int(1E5)
+
+
+@dataclass
+class ObservationModelConfig:
+    """Observation model configuration.
+
+    Attributes
+    ----------
+    model:
+        Name of the observation model. Currently only ``"negative_binomial"``
+        is supported.
+    params:
+        Model-specific parameters. For negative-binomial model, this includes:
+        - ``notif_nb_overdispersion``: Overdispersion parameter
+        - ``notif_scaling_factor``: Scaling factor from infections to cases
+        - ``notif_relative_scale``: Optional relative scaling factor
+    reference_population_size:
+        Denominator for normalizing incidences per population size. Default
+        is 100k (1E5), only change this if there is a clear reason.
+    """
+
+    model: str = "negative_binomial"
+    params: dict[str, float] = field(default_factory=dict)
+    reference_population_size: int = int(1E5)
+
+
+@dataclass
+class ScoringConfig:
+    """Scoring configuration for calibration mode.
+
+    Attributes
+    ----------
+    case_beam_quantiles:
+        Quantiles used to build the deterministic case prediction beam.
+    """
+
+    case_beam_quantiles: list[float] = field(
+        default_factory=lambda: [0.025, 0.25, 0.5, 0.75, 0.975]
+    )
 
 
 @dataclass
@@ -106,15 +149,11 @@ class SimulationConfig:
     temporal:
         Temporal settings (:class:`TemporalConfig`).
     location:
-        Location settings (:class:`LocationConfig`).
-    notif_nb_overdispersion:
-        Overdispersion parameter for the negative-binomial observation model.
-        Can be overridden per-simulation via ``params_df``.
-    notif_scaling_factor:
-        Scaling factor from abstract infections to expected reported cases.
-        Can be overridden per-simulation via ``params_df``.
-    case_beam_quantiles:
-        Quantiles used to build the deterministic case prediction beam.
+        Location settings (:class:`LocationConfig`), including population size.
+    observation_model:
+        Observation model configuration (:class:`ObservationModelConfig`).
+    scoring:
+        Scoring configuration (:class:`ScoringConfig`).
     sampling:
         Optional sampling settings parsed from ``sampling`` plus fixed
         parameter dictionaries used to build calibration ``params_df``.
@@ -122,13 +161,6 @@ class SimulationConfig:
         Initial infection seeding configuration.
     rng_seed:
         Global RNG seed for the observation model sampling.
-    reference_population_size:
-        Denominator for normalizing incidences per population size. Default
-        is 100k (1E5), only change this if there is a clear reason.
-    population_size:
-        Population size for the simulated location. Required if using relative
-        scaling scheme for the observation model. Defaults to the reference
-        population.
     """
 
     mode: Literal["calibration", "projection"] = "projection"
@@ -147,19 +179,21 @@ class SimulationConfig:
             location_id="DF",
         )
     )
-    notif_nb_overdispersion: float = 10.0
-    notif_scaling_factor: float = 1.0
-    case_beam_quantiles: list[float] = field(
-        default_factory=lambda: [0.025, 0.25, 0.5, 0.75, 0.975]
+    observation_model: ObservationModelConfig = field(
+        default_factory=lambda: ObservationModelConfig(
+            model="negative_binomial",
+            params={
+                "notif_nb_overdispersion": 10.0,
+                "notif_scaling_factor": 1.0,
+            },
+        )
     )
+    scoring: ScoringConfig = field(default_factory=ScoringConfig)
     sampling: SamplingConfig | None = None
     initial_infections: InitialInfectionsConfig = field(
         default_factory=InitialInfectionsConfig
     )
     rng_seed: int = 0
-
-    reference_population_size: int = int(1E5)  # For normalizing incidence per population
-    population_size: int = int(1E5)
 
 
 # ---------------------------------------------------------------------------

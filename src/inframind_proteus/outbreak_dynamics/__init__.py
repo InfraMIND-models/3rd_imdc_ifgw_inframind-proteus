@@ -5,7 +5,7 @@ Public API
 RenewalSimulator
     Vectorised renewal equation simulator.
 
-SimulationConfig, TemporalConfig, LocationConfig
+SimulationConfig, TemporalConfig, LocationConfig, ObservationModelConfig, ScoringConfig
     Configuration dataclasses.
 
 SimulationOutput
@@ -37,7 +37,9 @@ from .sampling import (
 from .scoring import nbinom_ppf_cf, wis_score_vectorized
 from .simulator import (
     LocationConfig,
+    ObservationModelConfig,
     RenewalSimulator,
+    ScoringConfig,
     SimulationConfig,
     SimulationOutput,
     TemporalConfig,
@@ -50,8 +52,10 @@ __all__ = [
     "InitialInfectionsConfig",
     "LocationConfig",
     "LogisticRT",
+    "ObservationModelConfig",
     "RenewalSimulator",
     "SamplingConfig",
+    "ScoringConfig",
     "SimulationConfig",
     "SimulationOutput",
     "TemporalConfig",
