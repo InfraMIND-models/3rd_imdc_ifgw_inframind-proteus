@@ -57,13 +57,14 @@ def make_config(
     zero_date: str = "2024-01-01",
     sim_start: str = "2024-01-01",
     rng_seed: int = 42,
+    metrics: list[str] | None = None,
     case_beam_quantiles: list[float] | None = None,
     calibration_start: str | None = None,
     calibration_end: str | None = None,
     population_size: int = int(1E5),
 ) -> SimulationConfig:
-    if case_beam_quantiles is None:
-        case_beam_quantiles = [0.025, 0.5, 0.975]
+    # if case_beam_quantiles is None:
+    #     case_beam_quantiles = [0.025, 0.5, 0.975]
     return SimulationConfig(
         mode=mode,
         num_simulations=num_sim,
@@ -89,7 +90,8 @@ def make_config(
             },
         ),
         scoring=ScoringConfig(
-            case_beam_quantiles=case_beam_quantiles,
+            metrics=metrics or ScoringConfig().metrics,
+            case_beam_quantiles=case_beam_quantiles or ScoringConfig().case_beam_quantiles,
         ),
         rng_seed=rng_seed,
     )

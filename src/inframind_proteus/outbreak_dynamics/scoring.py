@@ -154,6 +154,12 @@ def wis_score_vectorized(
         q_low = alpha / 2.0
         q_high = 1.0 - alpha / 2.0
 
+        if q_low not in available_q or q_high not in available_q:
+            raise ValueError(
+                f"Quantiles {q_low} and {q_high} must be present in simulations_df "
+                f"for alpha={alpha}"
+            )
+
         pred_low = simulations_df.xs(q_low, level="quantile").values
         pred_high = simulations_df.xs(q_high, level="quantile").values
         # Shape: (num_simulations, num_time_steps)
@@ -213,6 +219,12 @@ def coverages_vectorized(
         q_low = alpha / 2.0
         q_high = 1.0 - alpha / 2.0
         pi_width = 1.0 - alpha
+
+        if q_low not in available_q or q_high not in available_q:
+            raise ValueError(
+                f"Quantiles {q_low} and {q_high} must be present in simulations_df "
+                f"for alpha={alpha}"
+            )
 
         low_mask = sim_le_obs.xs(q_low, level="quantile")
         high_mask = sim_ge_obs.xs(q_high, level="quantile")

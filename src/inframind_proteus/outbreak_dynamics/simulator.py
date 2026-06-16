@@ -28,6 +28,7 @@ import numba as nb
 import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
+from voluptuous import default_factory
 
 from .generation_time import BaseGT, ConstantGammaGT
 from .initial_infections import (
@@ -127,6 +128,9 @@ class ScoringConfig:
         Quantiles used to build the deterministic case prediction beam.
     """
 
+    metrics: list[str] = field(
+        default_factory=lambda: ["wis", "rmse", "coverages", "nb_loglikelihood"]
+    )
     case_beam_quantiles: list[float] = field(
         default_factory=lambda: [0.025, 0.25, 0.5, 0.75, 0.975]
     )
@@ -764,6 +768,8 @@ class RenewalSimulator:
                 f"simulation period. Missing: {missing[:5].tolist()}"
             )
 
+        # ========
+
         simulations_df = case_beam_df[obs_cal.index]
         simulations_median_df = simulations_df.xs(0.5, level="quantile")
         summary_df = pd.DataFrame(
@@ -775,33 +781,40 @@ class RenewalSimulator:
         # Expects that `simulations_df` is sorted by `i_simulation`.
         # Warning: Resulting WIS values may be randomized if this is not satisfied.
 
-        # Weighted Interval Scores (WIS)
-        wis_array = wis_score_vectorized(
-            simulations_df=simulations_df,
-            observations_sr=obs_cal,
-        )
-        summary_df["wis"] = wis_array.sum(axis=1)
+        # ====
+
+        # Weighted Interval Score (WIS)
+        if "wis" in cfg.scoring.metrics:
+            # Weighted Interval Scores (WIS)
+            wis_array = wis_score_vectorized(
+                simulations_df=simulations_df,
+                observations_sr=obs_cal,
+            )
+            summary_df["wis"] = wis_array.sum(axis=1)
 
         # Root Mean Squared Error - individual components
-        rmse_array = rmse_vectorized(
-            simulations_df=simulations_median_df,
-            observations_sr=observations_sr,
-        )
-        summary_df["rmse"] = rmse_array
+        if "rmse" in cfg.scoring.metrics:
+            rmse_array = rmse_vectorized(
+                simulations_df=simulations_median_df,
+                observations_sr=observations_sr,
+            )
+            summary_df["rmse"] = rmse_array
 
-        # Negative-binomial loglikelihood (MAY BE TEMPORARILY DISABLED)
-        summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
-            simulations_df=simulations_median_df,
-            observations_sr=observations_sr,
-            overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
-        )
+        # Negative-binomial loglikelihood
+        if "nb_loglikelihood" in cfg.scoring.metrics:
+            summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
+                simulations_df=simulations_median_df,
+                observations_sr=observations_sr,
+                overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
+            )
 
         # Coverages of selected prediction intervals
-        coverages_df = coverages_vectorized(
-            simulations_df=simulations_df,
-            observations_sr=obs_cal,
-        )
-        summary_df = pd.concat([summary_df, coverages_df], axis=1)
+        if "coverages" in cfg.scoring.metrics:
+            coverages_df = coverages_vectorized(
+                simulations_df=simulations_df,
+                observations_sr=obs_cal,
+            )
+            summary_df = pd.concat([summary_df, coverages_df], axis=1)
 
         scoring = SimulationScoring(
             # wis_array=wis_array,
@@ -922,6 +935,10 @@ class RenewalSimulator:
                 defaults.scoring.case_beam_quantiles,
             )
         ]
+        scoring_metrics = scoring_cfg.get(
+            "metrics",
+            defaults.scoring.metrics
+        )
 
         # Parse population_size from location section (with fallback to simulation for transition)
         population_size = int(
@@ -956,6 +973,7 @@ class RenewalSimulator:
                 reference_population_size=reference_population_size,
             ),
             scoring=ScoringConfig(
+                metrics=scoring_metrics,
                 case_beam_quantiles=case_beam_quantiles,
             ),
             sampling=sampling_cfg,
