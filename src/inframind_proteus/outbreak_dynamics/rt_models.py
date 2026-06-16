@@ -188,7 +188,7 @@ class EnvelopedLogisticRT(BaseRT):
     rt_logist_dt_center :
         Days since start of active season at which the core logistic inflects.
     rt_logist_dt_end  :
-        Days since start of active season at which the active season ends.
+        Days since season center at which the active season ends.
     rt_logist_w_center :
         Exp width of the core logistic inflection (days); larger = smoother decline.
     rt_logist_w_env :
@@ -259,7 +259,8 @@ class EnvelopedLogisticRT(BaseRT):
 
         # Envelope: rises at start, falls at start + dt_end
         envelope_rise = self.logistic(time_grid, rt_start, rt_w_env)
-        envelope_fall = 1.0 - self.logistic(time_grid, rt_start + rt_dt_end, rt_w_env)
+        # envelope_fall = 1.0 - self.logistic(time_grid, rt_start + rt_dt_end, rt_w_env)  # Old: End relative to start
+        envelope_fall = 1.0 - self.logistic(time_grid, rt_start + rt_dt_center + rt_dt_end, rt_w_env)  # New: End relative to center
         E_t = envelope_rise * envelope_fall
 
         # Final R(t) = 1 + E(t) * (C(t) - 1)
