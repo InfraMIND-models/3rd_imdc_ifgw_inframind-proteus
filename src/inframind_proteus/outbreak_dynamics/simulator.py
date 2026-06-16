@@ -37,7 +37,8 @@ from .initial_infections import (
 )
 from .rt_models import BaseRT, LogisticRT, get_rt_model
 from .sampling import SamplingConfig, parse_calibration_sampling_config
-from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized
+from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized, \
+    coverages_vectorized
 from .utils import parse_timestamp
 
 
@@ -794,6 +795,13 @@ class RenewalSimulator:
             observations_sr=observations_sr,
             overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
         )
+
+        # Coverages of selected prediction intervals
+        coverages_df = coverages_vectorized(
+            simulations_df=simulations_df,
+            observations_sr=obs_cal,
+        )
+        summary_df = pd.concat([summary_df, coverages_df], axis=1)
 
         scoring = SimulationScoring(
             # wis_array=wis_array,

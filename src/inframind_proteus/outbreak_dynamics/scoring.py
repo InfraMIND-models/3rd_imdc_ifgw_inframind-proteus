@@ -176,6 +176,58 @@ def wis_score_vectorized(
     return wis
 
 
+def coverages_vectorized(
+    simulations_df: pd.DataFrame,
+    observations_sr: pd.Series,
+    alphas: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """Compute empirical coverage of case beam quantiles.
+
+    Parameters
+    ----------
+    simulations_df:
+        DataFrame with MultiIndex ``(quantile, i_simulation)`` and columns
+        corresponding to time steps.  Must include the 0.5 (median) quantile.
+    observations_sr:
+        Observed case counts indexed by time step.  Must match ``simulations_df.columns``.
+    alphas:
+        Prediction interval levels to evaluate coverages for.
+        Defaults to  ``[0.05, 0.5]`` for 95% and 50% PIs.
+
+    """
+    assert simulations_df.columns.equals(observations_sr.index), (
+        "Time steps in simulations and observations must match"
+    )
+
+    alphas = alphas or np.array([0.05, 0.5])
+
+    available_q = simulations_df.index.get_level_values("quantile").unique().values
+    available_q.sort()
+
+    # Greater-than and less-than masks
+    sim_le_obs = simulations_df.T.le(observations_sr, axis=0).T
+    sim_ge_obs = simulations_df.T.ge(observations_sr, axis=0).T
+
+    sr_list = list()
+    for alpha in alphas:
+        q_low = alpha / 2.0
+        q_high = 1.0 - alpha / 2.0
+        pi_width = 1.0 - alpha
+
+        low_mask = sim_le_obs.xs(q_low, level="quantile")
+        high_mask = sim_ge_obs.xs(q_high, level="quantile")
+
+        # In this combine operation, quantiles must match
+        sr = (low_mask & high_mask).mean(axis=1)
+        sr.name = f"coverage_{pi_width:0.3f}"
+
+        sr_list.append(sr)
+
+    coverages_df = pd.concat(sr_list, axis=1)
+
+    return coverages_df
+
+
 # ---------------------------------------------------------------------------
 # Individual trajectory metrics
 # ---------------------------------------------------------------------------
