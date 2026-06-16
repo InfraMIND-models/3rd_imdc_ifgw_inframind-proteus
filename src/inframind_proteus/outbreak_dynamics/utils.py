@@ -8,6 +8,7 @@ Includes:
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -66,7 +67,7 @@ def parse_timestamp(
     """
     if isinstance(value, pd.Timestamp):
         return value
-    if isinstance(value, str) or isinstance(value):
+    if isinstance(value, str) or isinstance(value, datetime):
         return pd.Timestamp(value)
     if isinstance(value, int):
         return epiweek_to_date(value)
