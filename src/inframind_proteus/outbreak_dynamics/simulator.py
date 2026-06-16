@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Any
 
 import numba as nb
 import numpy as np
@@ -112,7 +112,7 @@ class ObservationModelConfig:
     """
 
     model: str = "negative_binomial"
-    params: dict[str, float] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     reference_population_size: int = int(1E5)
 
 

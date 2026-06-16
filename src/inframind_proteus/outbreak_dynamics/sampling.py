@@ -15,6 +15,47 @@ import scipy.stats
 from numpy.random import Generator
 
 
+class PriorDistribution:
+
+    def scale_from_unit_interval(self, x: np.ndarray) -> np.ndarray:
+        """Scale a value from the unit interval [0, 1] to the distribution's support."""
+        raise NotImplementedError("Must be implemented by subclasses")
+
+
+class NormalPrior(PriorDistribution):
+    def __init__(self, mean: float, std: float):
+        self.mean = mean
+        self.std = std
+
+    def scale_from_unit_interval(self, x: np.ndarray) -> np.ndarray:
+        """Scale a value from the unit interval [0, 1] to the normal distribution's support."""
+        return scipy.stats.norm.ppf(x, loc=self.mean, scale=self.std)
+
+
+def get_prior_distribution(prior_cfg: dict) -> PriorDistribution:
+
+    dist_name = prior_cfg["distribution"]
+    dist_params = prior_cfg["parameters"]
+
+    cls_dict = {
+        "normal": NormalPrior,
+        # Add more distributions here as needed
+    }
+
+    try:
+        cls = cls_dict[dist_name.lower()]
+    except KeyError:
+        raise ValueError(
+            f"Unsupported distribution type: {dist_name!r}. "
+            f"Supported distributions: {list(cls_dict.keys())}"
+        )
+
+    prior = cls(**dist_params)
+
+    return prior
+
+
+
 @dataclass
 class SamplingConfig:
     """Sampling strategy configuration.
@@ -45,6 +86,7 @@ class SamplingConfig:
     rng_seed: int | None = None
     param_ranges: dict[str, list[float]] = field(default_factory=dict)
     param_scales: dict[str, str] = field(default_factory=dict)
+    param_priors: dict[str, PriorModel] = field(default_factory=dict)
     rt_params: dict[str, float] = field(default_factory=dict)
     observation_params: dict[str, float] = field(default_factory=dict)
 
@@ -107,6 +149,7 @@ def _get_scaled_bounds(
     return l_bounds, u_bounds
 
 
+
 def _transform_sampled_parameters(
         lhs_scaled: np.ndarray,
         param_scales: dict[str, str],
@@ -131,6 +174,7 @@ def sample_lhs(
     num_simulations: int,
     rng: Generator,
     param_scales: dict[str, str] | None = None,
+    param_priors: dict[str, PriorDistribution] | None = None,
 ) -> pd.DataFrame:
     """Draw a Latin Hypercube sample scaled to the given parameter ranges.
 
@@ -156,6 +200,7 @@ def sample_lhs(
         parameter names.
     """
     param_scales = param_scales or {}
+    param_priors = param_priors or {}
     param_names = list(param_ranges.keys())
 
     l_bounds, u_bounds = _get_scaled_bounds(
@@ -168,6 +213,7 @@ def sample_lhs(
     lhs_samples = lhs_sampler.random(n=num_simulations)
 
     # Scale to bounds (in potentially transformed space)
+    # _scale_params_with_priors()  # TODO: Define and implement
     lhs_scaled = scipy.stats.qmc.scale(lhs_samples, l_bounds, u_bounds)
     _transform_sampled_parameters(lhs_scaled, param_scales, param_names)
 
@@ -284,6 +330,24 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
             )
         param_scales[str(name)] = scale_type_str
 
+    param_priors: dict[str, PriorDistribution] = {}
+    priors_cfg_dict = sampling_cfg.get("param_priors", {}) or {}
+    if priors_cfg_dict is None:
+        priors_cfg_dict = {}
+    if not isinstance(priors_cfg_dict, dict):
+        raise ValueError("sampling.param_priors must be a dictionary")
+    for name, prior_cfg in priors_cfg_dict.items():
+        if not isinstance(prior_cfg, dict):
+            raise ValueError(f"sampling.param_priors[{name!r}] must be a dictionary, got {prior_cfg!r}")
+
+        if "distribution" not in prior_cfg:
+            raise ValueError(f"sampling.param_priors[{name!r}] missing required 'distribution' key")
+        if "parameters" not in prior_cfg:
+            raise ValueError(f"sampling.param_priors[{name!r}] missing required 'parameters' key")
+
+        param_priors[str(name)] = get_prior_distribution(prior_cfg)
+
+
     rt_params_raw = rt_cfg.get("params", {}) or {}
     obs_params_raw = obs_cfg.get("params", {}) or {}
     if not isinstance(rt_params_raw, dict):
@@ -300,6 +364,7 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
         rng_seed=rng_seed,
         param_ranges=param_ranges,
         param_scales=param_scales,
+        param_priors=param_priors,
         rt_params=rt_params,
         observation_params=observation_params,
     )

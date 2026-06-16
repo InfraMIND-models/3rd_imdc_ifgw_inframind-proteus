@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import inframind_proteus.outbreak_dynamics.sampling as sampling_module
+from inframind_proteus.outbreak_dynamics import PriorDistribution
 
 from inframind_proteus.outbreak_dynamics.sampling import (
     SamplingConfig,
@@ -194,6 +195,29 @@ class TestParseCalibrationSamplingConfig:
             }
         )
         assert parsed.method == "sobol"
+
+    def test_parse_prior_distribution(self):
+        config_dict = {
+            "simulation": {"num_simulations": 10},
+            "sampling": {
+                "method": "lhs",
+                "param_ranges": {
+                    "x": [0.0, 10.0],
+                },
+                "param_priors": {
+                    "x": {
+                        "distribution": "normal",
+                        "parameters": {"mean": 5.0, "std": 1.0},
+                    }
+                }
+            },
+        }
+        parsed = parse_calibration_sampling_config(config_dict)
+        assert len(parsed.param_priors) == 1
+        assert isinstance(parsed.param_priors, dict)
+        assert "x" in parsed.param_priors
+        prior = parsed.param_priors["x"]
+        assert isinstance(prior, PriorDistribution)
 
 
 class TestBuildCalibrationParamsDf:

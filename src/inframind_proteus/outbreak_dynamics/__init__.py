@@ -30,6 +30,7 @@ from .initial_infections import (
 from .rt_models import BaseRT, LogisticRT
 from .sampling import (
     SamplingConfig,
+    PriorDistribution,
     build_calibration_params_df,
     parse_calibration_sampling_config,
     sample_lhs,
@@ -55,6 +56,7 @@ __all__ = [
     "ObservationModelConfig",
     "RenewalSimulator",
     "SamplingConfig",
+    "PriorDistribution",
     "ScoringConfig",
     "SimulationConfig",
     "SimulationOutput",
