@@ -465,8 +465,8 @@ class RenewalSimulator:
 
         cases_vec, case_beam_df = self._apply_observation_model(
             infec_sim, _params, rng,
-            population_size=cfg.population_size,
-            reference_population_size=cfg.reference_population_size,
+            population_size=cfg.location.population_size,
+            reference_population_size=cfg.observation_model.reference_population_size,
         )
 
         # ------------------------------------------------------------------
@@ -621,7 +621,7 @@ class RenewalSimulator:
         params_df: pd.DataFrame,
         rng: np.random.Generator,
         population_size: int | None = None,
-        reference_population_size: int = SimulationConfig.reference_population_size
+        reference_population_size: int = int(1E5)
     ) -> tuple[np.ndarray, pd.DataFrame]:
         """Apply the negative-binomial observation (notification) model.
 
@@ -688,12 +688,12 @@ class RenewalSimulator:
                 nbinom_ppf_cf(q=q, n=overdisp, p=p, continuity=False),
                 index=params_df.index,
             )
-            for q in self.config.case_beam_quantiles
+            for q in self.config.scoring.case_beam_quantiles
         ]
 
         case_beam_df = pd.concat(
             beam_frames,
-            keys=self.config.case_beam_quantiles,
+            keys=self.config.scoring.case_beam_quantiles,
             names=["quantile", "i_simulation"],
         )
 
@@ -827,7 +827,6 @@ class RenewalSimulator:
         sim_cfg = config_dict.get("simulation", {}) or {}
         temporal_cfg = config_dict.get("temporal", {}) or {}
         location_cfg = config_dict.get("location", {}) or {}
-        obs_params = (config_dict.get("observation_model", {}) or {}).get("params", {}) or {}
         scoring_cfg = config_dict.get("scoring", {}) or {}
         rt_cfg = config_dict.get("reproduction_number", {}) or {}
         gt_cfg = config_dict.get("generation_time", {}) or {}
@@ -885,15 +884,40 @@ class RenewalSimulator:
             else defaults.temporal.calibration_end
         )
 
+        # Parse observation model configuration
+        obs_model_cfg_dict = config_dict.get("observation_model", {}) or {}
+        obs_model_name = obs_model_cfg_dict.get("model", defaults.observation_model.model)
+        obs_model_params = obs_model_cfg_dict.get("params", {}) or {}
+        
+        # Convert params to float dict
+        obs_params_parsed = {
+            str(k): float(v) for k, v in obs_model_params.items()
+        }
+        
+        # Get reference_population_size (currently not in YAML, using default)
+        reference_population_size = int(
+            obs_model_cfg_dict.get(
+                "reference_population_size",
+                defaults.observation_model.reference_population_size
+            )
+        )
+
+        # Parse scoring configuration
         case_beam_quantiles = [
             float(q)
             for q in scoring_cfg.get(
                 "case_beam_quantiles",
-                sim_cfg.get("case_beam_quantiles", defaults.case_beam_quantiles),
+                defaults.scoring.case_beam_quantiles,
             )
         ]
 
-        population_size = sim_cfg.get("population_size", defaults.population_size)
+        # Parse population_size from location section (with fallback to simulation for transition)
+        population_size = int(
+            location_cfg.get(
+                "population_size",
+                sim_cfg.get("population_size", defaults.location.population_size)
+            )
+        )
 
         config = SimulationConfig(
             mode=mode,
@@ -912,30 +936,19 @@ class RenewalSimulator:
                     "location_id_variable", defaults.location.location_id_variable
                 ),
                 location_id=location_cfg.get("location_id", defaults.location.location_id),
+                population_size=population_size,
             ),
-            notif_nb_overdispersion=float(
-                obs_params.get(
-                    "notif_nb_overdispersion",
-                    sim_cfg.get(
-                        "notif_nb_overdispersion",
-                        defaults.notif_nb_overdispersion,
-                    ),
-                )
+            observation_model=ObservationModelConfig(
+                model=obs_model_name,
+                params=obs_params_parsed,
+                reference_population_size=reference_population_size,
             ),
-            notif_scaling_factor=float(
-                obs_params.get(
-                    "notif_scaling_factor",
-                    sim_cfg.get(
-                        "notif_scaling_factor",
-                        defaults.notif_scaling_factor,
-                    ),
-                )
+            scoring=ScoringConfig(
+                case_beam_quantiles=case_beam_quantiles,
             ),
-            case_beam_quantiles=case_beam_quantiles,
             sampling=sampling_cfg,
             initial_infections=initial_infections_cfg,
             rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),
-            population_size=population_size,
         )
 
         return cls(rt_model=rt_model, gt_model=gt_model, config=config)
