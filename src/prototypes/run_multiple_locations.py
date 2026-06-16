@@ -69,7 +69,7 @@ def main():
         # Create and modify the simulator and config object
         config_dict = deepcopy(base_config_dict)
         config_dict["location"]["location_id"] = location_id
-        config_dict["simulation"]["population_size"] = uf_table_df.set_index("uf").loc[
+        config_dict["location"]["population_size"] = uf_table_df.set_index("uf").loc[
             location_id, f"population_{year}"].item()
         _temporal = config_dict["temporal"]
         _temporal["zero_date"] = epiweeks.Week(year, zero_date_epiweek).startdate().isoformat()

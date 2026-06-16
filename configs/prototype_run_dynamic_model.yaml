@@ -27,6 +27,7 @@ location:
   #                        regional_geocode | macrorregional_geocode
   location_id_variable: "uf"
   location_id: "DF"
+  population_size: 3094325  # Population for DF (can be overridden per location)
 
 # ----------------------------------------------------------------------------
 generation_time:

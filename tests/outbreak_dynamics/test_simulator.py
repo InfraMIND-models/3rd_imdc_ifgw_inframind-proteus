@@ -24,7 +24,9 @@ from inframind_proteus.outbreak_dynamics.generation_time import ConstantGammaGT
 from inframind_proteus.outbreak_dynamics.rt_models import LogisticRT
 from inframind_proteus.outbreak_dynamics.simulator import (
     LocationConfig,
+    ObservationModelConfig,
     RenewalSimulator,
+    ScoringConfig,
     SimulationConfig,
     SimulationOutput,
     TemporalConfig,
@@ -58,6 +60,7 @@ def make_config(
     case_beam_quantiles: list[float] | None = None,
     calibration_start: str | None = None,
     calibration_end: str | None = None,
+    population_size: int = int(1E5),
 ) -> SimulationConfig:
     if case_beam_quantiles is None:
         case_beam_quantiles = [0.025, 0.5, 0.975]
@@ -73,7 +76,21 @@ def make_config(
             calibration_start=pd.Timestamp(calibration_start) if calibration_start else None,
             calibration_end=pd.Timestamp(calibration_end) if calibration_end else None,
         ),
-        case_beam_quantiles=case_beam_quantiles,
+        location=LocationConfig(
+            location_id_variable="uf",
+            location_id="DF",
+            population_size=population_size,
+        ),
+        observation_model=ObservationModelConfig(
+            model="negative_binomial",
+            params={
+                "notif_nb_overdispersion": 10.0,
+                "notif_scaling_factor": 1.0,
+            },
+        ),
+        scoring=ScoringConfig(
+            case_beam_quantiles=case_beam_quantiles,
+        ),
         rng_seed=rng_seed,
     )
 
@@ -302,7 +319,7 @@ class TestObservationModel:
         beam_quantiles = sorted(
             case_beam_df.index.get_level_values("quantile").unique()
         )
-        assert beam_quantiles == sorted(sim.config.case_beam_quantiles)
+        assert beam_quantiles == sorted(sim.config.scoring.case_beam_quantiles)
 
     def test_zero_infections_give_zero_cases(self, sim, params):
         """With zero infections, expected cases = 0 → NB always draws 0."""
@@ -319,7 +336,7 @@ class TestObservationModel:
         rng = np.random.default_rng(0)
         _, case_beam_df = sim._apply_observation_model(infec, params, rng)
 
-        q_sorted = sorted(sim.config.case_beam_quantiles)
+        q_sorted = sorted(sim.config.scoring.case_beam_quantiles)
         beam_low = case_beam_df.xs(q_sorted[0], level="quantile").values
         beam_high = case_beam_df.xs(q_sorted[-1], level="quantile").values
         assert np.all(beam_low <= beam_high)
@@ -853,9 +870,10 @@ class TestFactory:
         assert cfg.temporal.step_dt == 7
         assert cfg.location.location_id_variable == "uf"
         assert cfg.location.location_id == "DF"
-        assert cfg.notif_nb_overdispersion == pytest.approx(6.5)
-        assert cfg.notif_scaling_factor == pytest.approx(2.0)
-        assert cfg.case_beam_quantiles == [0.1, 0.5, 0.9]
+        assert cfg.observation_model.model == "negative_binomial"
+        assert cfg.observation_model.params["notif_nb_overdispersion"] == pytest.approx(6.5)
+        assert cfg.observation_model.params["notif_scaling_factor"] == pytest.approx(2.0)
+        assert cfg.scoring.case_beam_quantiles == [0.1, 0.5, 0.9]
         assert cfg.sampling is not None
         assert cfg.sampling.method == "lhs"
         assert cfg.sampling.param_ranges["rt_logist_width"] == [1.0, 80.0]
@@ -883,9 +901,11 @@ class TestFactory:
         assert cfg.temporal.step_dt == defaults.temporal.step_dt
         assert cfg.location.location_id_variable == defaults.location.location_id_variable
         assert cfg.location.location_id == defaults.location.location_id
-        assert cfg.notif_nb_overdispersion == defaults.notif_nb_overdispersion
-        assert cfg.notif_scaling_factor == defaults.notif_scaling_factor
-        assert cfg.case_beam_quantiles == defaults.case_beam_quantiles
+        assert cfg.location.population_size == defaults.location.population_size
+        assert cfg.observation_model.model == defaults.observation_model.model
+        assert cfg.observation_model.params == defaults.observation_model.params
+        assert cfg.observation_model.reference_population_size == defaults.observation_model.reference_population_size
+        assert cfg.scoring.case_beam_quantiles == defaults.scoring.case_beam_quantiles
         assert cfg.sampling is not None
         assert cfg.sampling.method == "lhs"
         assert cfg.sampling.param_ranges == {}

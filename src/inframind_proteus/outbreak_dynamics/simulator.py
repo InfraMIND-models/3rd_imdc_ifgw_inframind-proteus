@@ -889,10 +889,14 @@ class RenewalSimulator:
         obs_model_name = obs_model_cfg_dict.get("model", defaults.observation_model.model)
         obs_model_params = obs_model_cfg_dict.get("params", {}) or {}
         
-        # Convert params to float dict
-        obs_params_parsed = {
-            str(k): float(v) for k, v in obs_model_params.items()
-        }
+        # Convert params to float dict, using defaults when params is empty
+        if obs_model_params:
+            obs_params_parsed = {
+                str(k): float(v) for k, v in obs_model_params.items()
+            }
+        else:
+            # Use defaults when no params provided
+            obs_params_parsed = defaults.observation_model.params.copy()
         
         # Get reference_population_size (currently not in YAML, using default)
         reference_population_size = int(
