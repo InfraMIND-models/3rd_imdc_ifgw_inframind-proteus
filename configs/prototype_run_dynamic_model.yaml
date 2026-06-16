@@ -42,13 +42,14 @@ reproduction_number:
   # Fixed (non-sampled) defaults — overridden by sampling.lhs_params below
   # for dimensions that are sampled.
   params:
-      rt_logist_start:     50.0
-      rt_logist_dt_center: 69.63
-      rt_logist_dt_end:    261.23
-      rt_logist_w_center:  8.700
+      rt_logist_start:     50.
+      rt_logist_dt_center: 29.049660
+      rt_logist_dt_end:    48.042700
+      rt_logist_w_center:  11.867424
       rt_logist_w_env:     2.0
       rt_logist_r_low:     0.5
       rt_logist_r_high:    2.0
+      rt_logist_r_off:     0.881221
 
 # ----------------------------------------------------------------------------
 sampling:
@@ -61,12 +62,13 @@ sampling:
   param_ranges:
 
     # --- Enveloped logistic model
-    rt_logist_r_high: [1.05, 4.5]
-    rt_logist_start: [-40, 200]
-    notif_relative_scale: [0.00001, 100.0]
-    rt_logist_dt_end:  [10, 150]
-    rt_logist_dt_center:  [10, 150]
-    rt_logist_w_center:   [0.5, 15.]
+    rt_logist_r_high: [1.05, 5.0]
+    rt_logist_start: [-100, 150]
+#    notif_relative_scale: [0.00001, 100.0]
+#    rt_logist_r_off: [0.4, 1.0]
+#    rt_logist_dt_end:  [10, 150]
+#    rt_logist_dt_center:  [10, 150]
+#    rt_logist_w_center:   [0.5, 15.]
 
   param_priors:
 #    # Optional prior distributions for sampled parameters.
@@ -97,7 +99,7 @@ observation_model:
   params:
     notif_nb_overdispersion: 100.0
     notif_scaling_factor:     250.
-    notif_relative_scale:  4.92  # 1.0    # scaling = relative_scaling * population / 100k
+    notif_relative_scale:  5.328036  # 1.0    # scaling = relative_scaling * population / 100k
 
 # ----------------------------------------------------------------------------
 scoring:

@@ -195,6 +195,7 @@ class EnvelopedLogisticRT(BaseRT):
         Exp width of the envelope transitions (days); larger = smoother transition.
     rt_logist_r_low     : Asymptotic minimum R of the core logistic.
     rt_logist_r_high    : Asymptotic maximum R of the core logistic.
+    rt_logist_r_off     : R value outside the active season (off-season baseline).
     """
 
     required_params: list[str] = [
@@ -205,6 +206,7 @@ class EnvelopedLogisticRT(BaseRT):
         "rt_logist_w_env",
         "rt_logist_r_low",
         "rt_logist_r_high",
+        "rt_logist_r_off",
     ]
 
     @staticmethod
@@ -251,6 +253,7 @@ class EnvelopedLogisticRT(BaseRT):
         rt_w_env = params_df["rt_logist_w_env"].to_numpy()[:, np.newaxis]
         rt_r_low = params_df["rt_logist_r_low"].to_numpy()[:, np.newaxis]
         rt_r_high = params_df["rt_logist_r_high"].to_numpy()[:, np.newaxis]
+        rt_r_off = params_df["rt_logist_r_off"].to_numpy()[:, np.newaxis]
 
         # Core logistic: decreasing from r_high to r_low, centered at start + dt_center
         center_abs = rt_start + rt_dt_center
@@ -263,8 +266,8 @@ class EnvelopedLogisticRT(BaseRT):
         envelope_fall = 1.0 - self.logistic(time_grid, rt_start + rt_dt_center + rt_dt_end, rt_w_env)  # New: End relative to center
         E_t = envelope_rise * envelope_fall
 
-        # Final R(t) = 1 + E(t) * (C(t) - 1)
-        rt_trajectory = 1.0 + E_t * (C_t - 1.0)
+        # Final R(t) = off + E(t) * (C(t) - off)
+        rt_trajectory = rt_r_off + E_t * (C_t - rt_r_off)
 
         return rt_trajectory
 
