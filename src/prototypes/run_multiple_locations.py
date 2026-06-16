@@ -29,7 +29,8 @@ def main():
     # cases_cache = DiseaseTimeSeriesCache(Path("data/disease/dengue_cases_uf_weekly"))
 
     zero_date_epiweek = 41
-    sim_start_epiweek = 26  # Using zero_date minus at least 2x the maximum generation time in weeks
+    sim_start_epiweek = 26
+        # Note: Train data for each season ends at epiweek 25.
     calibration_start_epiweek = 41
     calibration_end_epiweek = 40  # Of the next year
 
@@ -140,7 +141,8 @@ def main():
     # map_parallel_or_sequential(
         _task,
         location_year_index,
-        ncpus=5, chunksize=1
+        # ncpus=5, chunksize=1
+        ncpus=1, chunksize=1
     )
     # run_simulation_for_location_year(("SP", 2023))
     print("Done all simulations!")
