@@ -51,6 +51,7 @@ class ProgramConfig:
     stage2_free_params = [
         "rt_logist_r_high",
         "rt_logist_start",
+        # "notif_nb_overdispersion",
         # "notif_relative_scale",
     ]
     stage2_ll_temperature = 1.  # Higher values flatten the likelihood distribution
@@ -300,6 +301,8 @@ def run_calibration_stage_1(
 
     i_max = results.scoring.summary["nb_loglikelihood"].idxmax()
     max_ll_params = params_df.loc[i_max]
+    max_ll_params.index.name = "parameter_name"
+    max_ll_params.name = "value"
 
     # ===
     # --- Visualization/diagnostics
@@ -336,7 +339,10 @@ def run_calibration_stage_1(
         fig.savefig(dir / "stage1_max_ll_case_beam.pdf")
         plt.close(fig)
 
-    # ====
+    # --- Export some stuff
+    max_ll_params.to_csv(dir / "stage1_max_ll_params.csv")
+
+    # ===
 
     out = Stage1Outputs(
         max_ll_params=max_ll_params,
@@ -375,6 +381,7 @@ def run_calibration_stage_2(
 
     # --- Override parameters found in stage 1
     param_ranges = config_dict["sampling"]["param_ranges"]
+    _sampling = config_dict["sampling"]
     nuisance_param_names = [
         p for p in param_ranges.keys()
         if p not in cfg.stage2_free_params
@@ -391,7 +398,14 @@ def run_calibration_stage_2(
         sub_d[param_name] = stage1_outputs.max_ll_params[param_name]
 
         # Remove from exploration
-        del _d["sampling"]["param_ranges"][param_name]
+        del _sampling["param_ranges"][param_name]
+
+    # # --- Manually add overdispersion to be explored
+    # if "notif_nb_overdispersion" in cfg.stage2_free_params:
+    #     _sampling["param_ranges"]["notif_nb_overdispersion"] = [0.1, 100.0]
+    #     _sampling["param_scales"] = {
+    #         "notif_nb_overdispersion": "inverse"
+    #     }
 
     _d["simulation"]["num_simulations"] = cfg.stage2_num_simulations
 
@@ -498,12 +512,16 @@ def run_calibration_stage_2(
     sampled_beams = results.case_beam_df.loc[
         results.case_beam_df.index.get_level_values("i_simulation").isin(sampled_params_df.index)
     ]
-    # Create reproduction number trajectories
-
+    # Reproduction number from the same sampled trajectories
+    # Rebuild the full params df but only with the best sampled parameters
+    rt_df = _rebuild_rt_curves(results.config, sampled_params_df, simulator)
 
     rc = deepcopy(plt.rcParams)
     with plt.rc_context(rc):
-        fig, ax = plt.subplots(figsize=(8, 4))
+        fig, axes = plt.subplots(nrows=2, figsize=(8, 7))
+
+        # --- Case Trajectories
+        ax = axes[0]
 
         # Observations
         _obs = observations_sr.loc[sim_cfg.temporal.sim_start:sim_cfg.temporal.calibration_end]
@@ -517,14 +535,19 @@ def run_calibration_stage_2(
 
         ax.set_ylabel("Weekly cases")
         ax.legend()
-        fig.tight_layout()
 
+        # --- Reproduction number
+        ax = axes[1]
+        ax.plot(rt_df.T, color="darkslateblue", alpha=0.2)
+        ax.plot(rt_df.columns, np.ones(rt_df.shape[1]), "k--", label="R=1")
+        ax.set_ylabel("Reproduction number")
+        ax.set_xlim(*axes[0].get_xlim())  # Align x-axis with case trajectories
+
+        fig.tight_layout()
         dir = Path(f".local/calibrate_multistage/{location_id}_{year}")
         dir.mkdir(exist_ok=True, parents=True)
         fig.savefig(dir / "stage2_median_trajectories.pdf")
         plt.close(fig)
-
-    # Reproduction number from the same sampled trajectories
 
 
 
@@ -579,6 +602,41 @@ def run_calibration_stage_2(
 
     return out
 
+
+def _rebuild_rt_curves(
+        config: SimulationConfig,
+        sampled_params_df: pd.DataFrame,
+        simulator: RenewalSimulator
+) -> pd.DataFrame:
+    _config = deepcopy(config)
+    _n = sampled_params_df.shape[0]
+    _config.sampling.method = "given"
+    _params_df = build_calibration_params_df(_n, _config.sampling, given_params=sampled_params_df)
+    # t_start = float(
+    #     (_config.temporal.sim_start - _config.temporal.zero_date).days
+    # ) - simulator._gt_max_steps * _config.temporal.step_dt
+
+    # Reproduce the same procedure as in the simulator
+    # However it would be better to keep this directly from the simulations
+    sim_start_day = float((_config.temporal.sim_start - _config.temporal.zero_date).days)
+    t_start = sim_start_day - int(np.ceil(_config.gt_max / _config.temporal.step_dt))
+
+    rt_array = simulator.rt_model.generate(
+        params_df=_params_df,
+        num_time_steps=_config.num_time_steps,
+        step_dt=_config.temporal.step_dt,
+        t_start=t_start,
+    )
+    # Shift time to assign dates
+    _cols = _config.temporal.zero_date + pd.Timedelta(t_start, unit="D") + pd.to_timedelta(
+        np.arange(rt_array.shape[1]) * _config.temporal.step_dt, unit="D")
+    rt_df = pd.DataFrame(
+        rt_array,
+        index=sampled_params_df.index,
+        columns=_cols,
+    )
+
+    return rt_df
 
 
 if __name__ == "__main__":

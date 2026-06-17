@@ -431,11 +431,11 @@ def parse_calibration_sampling_config(config_dict: dict) -> SamplingConfig:
     param_scales: dict[str, str] = {}
     for name, scale_type in param_scales_raw.items():
         scale_type_str = str(scale_type).strip().lower()
-        if scale_type_str not in ("linear", "log"):
-            raise ValueError(
-                f"sampling.scale[{name!r}] must be 'linear' or 'log', "
-                f"got {scale_type_str!r}"
-            )
+        # if scale_type_str not in ("linear", "log"):
+        #     raise ValueError(
+        #         f"sampling.scale[{name!r}] must be 'linear' or 'log', "
+        #         f"got {scale_type_str!r}"
+        #     )
         param_scales[str(name)] = scale_type_str
 
     param_priors: dict[str, PriorDistribution] = {}

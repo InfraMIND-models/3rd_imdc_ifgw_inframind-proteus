@@ -46,7 +46,7 @@ reproduction_number:
       rt_logist_dt_center: 29.049660
       rt_logist_dt_end:    48.042700
       rt_logist_w_center:  11.867424
-      rt_logist_w_env:     2.0
+      rt_logist_w_env:     2.5
       rt_logist_r_low:     0.5
       rt_logist_r_high:    2.0
       rt_logist_r_off:     0.881221
@@ -64,11 +64,13 @@ sampling:
     # --- Enveloped logistic model
     rt_logist_r_high: [1.05, 5.0]
     rt_logist_start: [-100, 150]
-    notif_relative_scale: [0.00001, 100.0]
+    notif_relative_scale: [0.00001, 500.0]
+#    notif_nb_overdispersion: [1.0, 100.0]
+#    rt_logist_w_env: [0.5, 20.]
     rt_logist_r_off: [0.4, 1.0]
     rt_logist_dt_end:  [10, 150]
     rt_logist_dt_center:  [10, 150]
-    rt_logist_w_center:   [0.5, 15.]
+    rt_logist_w_center:   [0.5, 50.]
 
   param_priors:
 #    # Optional prior distributions for sampled parameters.
@@ -78,13 +80,10 @@ sampling:
 #        mean: 5.0
 #        std: 1.0
 
-
-
-  # Scale specification: "linear" (default) or "log"
   # Unspecified parameters default to linear scale.
   param_scales:
 #    notif_scaling_factor: log
-#    notif_nb_overdispersion: inverse
+    notif_nb_overdispersion: inverse
 
 # ----------------------------------------------------------------------------
 initial_infections:
