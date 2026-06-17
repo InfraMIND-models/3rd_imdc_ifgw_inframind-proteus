@@ -45,9 +45,9 @@ class ProgramConfig:
     ncpus = 2
 
     # ---
-    stage1_num_simulations = 2**19
+    stage1_num_simulations = 2**20
 
-    stage2_num_simulations = 2**19
+    stage2_num_simulations = 2**20
     stage2_free_params = [
         "rt_logist_r_high",
         "rt_logist_start",
@@ -60,6 +60,7 @@ class ProgramConfig:
     stage2_min_samples = 1000  # Minimum number of samples to keep after cutoff (overrides cutoff if not met)
     stage2_max_samples = 5000  # Maximum number of samples to keep, avoids heavy KDE calculation
 
+    stage3_num_simulations = 2**18
 
     def stage2_prior(self, df: pd.DataFrame):
         """Given a data frame of parameters, calculate prior distribution weights
@@ -194,6 +195,42 @@ def _calc_scaling_from_presim_period(
     return mean_rel_scaling, std_rel_scaling
 
 
+def _rebuild_rt_curves(
+        config: SimulationConfig,
+        sampled_params_df: pd.DataFrame,
+        simulator: RenewalSimulator
+) -> pd.DataFrame:
+    _config = deepcopy(config)
+    _n = sampled_params_df.shape[0]
+    _config.sampling.method = "given"
+    _params_df = build_calibration_params_df(_n, _config.sampling, given_params=sampled_params_df)
+    # t_start = float(
+    #     (_config.temporal.sim_start - _config.temporal.zero_date).days
+    # ) - simulator._gt_max_steps * _config.temporal.step_dt
+
+    # Reproduce the same procedure as in the simulator
+    # However it would be better to keep this directly from the simulations
+    sim_start_day = float((_config.temporal.sim_start - _config.temporal.zero_date).days)
+    t_start = sim_start_day - int(np.ceil(_config.gt_max / _config.temporal.step_dt))
+
+    rt_array = simulator.rt_model.generate(
+        params_df=_params_df,
+        num_time_steps=_config.num_time_steps,
+        step_dt=_config.temporal.step_dt,
+        t_start=t_start,
+    )
+    # Shift time to assign dates
+    _cols = _config.temporal.zero_date + pd.Timedelta(t_start, unit="D") + pd.to_timedelta(
+        np.arange(rt_array.shape[1]) * _config.temporal.step_dt, unit="D")
+    rt_df = pd.DataFrame(
+        rt_array,
+        index=sampled_params_df.index,
+        columns=_cols,
+    )
+
+    return rt_df
+
+
 def run_calibration_for_location_year(
         location_year_tuple,
         cfg: ProgramConfig,
@@ -233,111 +270,15 @@ def run_calibration_for_location_year(
 
     # Stage 3: Confidence interval adjustment
     # ==============
-
-    # == TESTS/PROTOTYPES
-    print("\tTesting stage 3: confidence interval adjustment")
-
-    # Random orthogonal sampling: KDE x Overdispersion
-    n_samples = 100000
-    overdisp_range = [0.1, 100.0]
-    rng =  np.random.default_rng(321)
-    kde_param_samples = stage2_outputs.posterior_kde.resample(n_samples, seed=rng).T
-    overdisp_param_samples = 1. / (
-        rng.uniform(1. / overdisp_range[1], 1. / overdisp_range[0], size=n_samples)
-    )
-
-    config_dict = _d = deepcopy(base_config_dict)
-
-    # --- Set configuration for this stage
-    _set_config_dict_common(
-        cfg, config_dict,
-        location_id,
-        year,
-        uf_table_df
-    )
-
-    # --- Override parameters found in stage 1
-    param_ranges: dict = config_dict["sampling"]["param_ranges"]
-    # param_ranges[]  # TODO: Rebuild
-    _sampling = config_dict["sampling"]
-    nuisance_param_names = [
-        p for p in param_ranges.keys()
-        if p not in cfg.stage2_free_params
-    ]
-    for param_name in nuisance_param_names:
-        # Set max likelihood value from stage 1 as fixed value for this stage
-        # (Try to guess parameter location from its name)
-        if param_name.startswith("rt_"):
-            sub_d = _d["reproduction_number"]["params"]
-        elif param_name.startswith("notif_"):
-            sub_d = _d["observation_model"]["params"]
-        else:
-            raise ValueError(f"Cannot guess parameter location for {param_name}")
-        sub_d[param_name] = stage1_outputs.max_ll_params[param_name]
-
-    # Manually clear exploration parameters, we'll sample them here
-    param_ranges.clear()
-
-
-    _d["simulation"]["num_simulations"] = n_samples
-    _scoring = _d["scoring"]
-    _scoring["metrics"] = ["nb_loglikelihood", "coverages"]
-
-    # --- Create simulator object with modified configuration dictionary
-    simulator = RenewalSimulator.from_config_dict(config_dict)
-    sim_cfg = simulator.config
-
-    # ====
-
-    # --- Build auxiliary data frames for simulations
-    params_df = build_calibration_params_df(sim_cfg.num_simulations, sim_cfg.sampling)
-    # Override params_df with the manually sampled stuff
-    params_df[cfg.stage2_free_params] = kde_param_samples
-    params_df["notif_nb_overdispersion"] = overdisp_param_samples
-
-    sim_cfg.num_simulations = num_simulations = params_df.shape[0]  # Update in case sampling method changes number of simulations
-    initial_infec_df = build_initial_infec_df(
-        sim_cfg.num_simulations,
-        simulator._gt_max_steps,
-        sim_cfg.temporal.step_dt,
-        sim_cfg.initial_infections
-    )
-
-    # ====
-    # --- RUN
-    results = simulator.run_sequential_chunks(
-        params_df=params_df,
-        initial_infec_df=initial_infec_df,
+    stage3_outputs = run_calibration_stage_3(
+        location_id, year,
+        cfg=cfg,
+        base_config_dict=base_config_dict,
         observations_sr=observations_sr,
+        uf_table_df=uf_table_df,
+        stage1_outputs=stage1_outputs,
+        stage2_outputs=stage2_outputs,
     )
-
-    df = pd.concat([params_df, results.scoring.summary], axis=1)
-
-    # --- Test: Maximum NB likelihood
-    i_max = df["coverage_loglikelihood"].idxmax()
-    best_sim = results.case_beam_df.xs(i_max, level="i_simulation")
-
-    fig, ax = plt.subplots()
-    _obs = observations_sr.loc[sim_cfg.temporal.sim_start:sim_cfg.temporal.calibration_end]
-    ax.plot(_obs.index, _obs.values, "ks", label="Observations")
-    ax.plot(best_sim.loc[0.5].T, color="darkslateblue", alpha=0.7, label="Best sim")
-    ax.fill_between(
-        best_sim.columns,
-        best_sim.loc[0.25], best_sim.loc[0.75],
-        color="darkslateblue", alpha=0.3, label="50% CI"
-    )
-    ax.fill_between(
-        best_sim.columns,
-        best_sim.loc[0.025], best_sim.loc[0.975],
-        color="darkslateblue", alpha=0.3, label="95% CI"
-    )
-
-
-    fig.show()
-
-    assert True
-
-
 
 
 
@@ -371,6 +312,11 @@ def run_calibration_stage_1(
 
     _scoring = _d["scoring"]
     _scoring["metrics"] = ["nb_loglikelihood"]
+
+    # --- Manually remove overdispersion from exploration (adjusted later in stage 3)
+    _sampling = _d["sampling"]
+    if "notif_nb_overdispersion" in _sampling["param_ranges"]:
+        del _sampling["param_ranges"]["notif_nb_overdispersion"]
 
     # --- Create simulator object with modified configuration dictionary
     simulator = RenewalSimulator.from_config_dict(config_dict)
@@ -713,40 +659,124 @@ def run_calibration_stage_2(
     return out
 
 
-def _rebuild_rt_curves(
-        config: SimulationConfig,
-        sampled_params_df: pd.DataFrame,
-        simulator: RenewalSimulator
-) -> pd.DataFrame:
-    _config = deepcopy(config)
-    _n = sampled_params_df.shape[0]
-    _config.sampling.method = "given"
-    _params_df = build_calibration_params_df(_n, _config.sampling, given_params=sampled_params_df)
-    # t_start = float(
-    #     (_config.temporal.sim_start - _config.temporal.zero_date).days
-    # ) - simulator._gt_max_steps * _config.temporal.step_dt
+@dataclass
+class Stage3Outputs:
+    pass
 
-    # Reproduce the same procedure as in the simulator
-    # However it would be better to keep this directly from the simulations
-    sim_start_day = float((_config.temporal.sim_start - _config.temporal.zero_date).days)
-    t_start = sim_start_day - int(np.ceil(_config.gt_max / _config.temporal.step_dt))
 
-    rt_array = simulator.rt_model.generate(
-        params_df=_params_df,
-        num_time_steps=_config.num_time_steps,
-        step_dt=_config.temporal.step_dt,
-        t_start=t_start,
-    )
-    # Shift time to assign dates
-    _cols = _config.temporal.zero_date + pd.Timedelta(t_start, unit="D") + pd.to_timedelta(
-        np.arange(rt_array.shape[1]) * _config.temporal.step_dt, unit="D")
-    rt_df = pd.DataFrame(
-        rt_array,
-        index=sampled_params_df.index,
-        columns=_cols,
+def run_calibration_stage_3(
+        location_id,
+        year,
+        cfg: ProgramConfig,
+        base_config_dict: dict,
+        observations_sr: pd.Series,
+        uf_table_df: pd.DataFrame,
+        stage1_outputs: Stage1Outputs,
+        stage2_outputs: Stage2Outputs,
+):
+    print(f"\trun_calibration_stage_3(({location_id}, {year}))")
+
+    config_dict = _d = deepcopy(base_config_dict)
+
+    # --- Set configuration for this stage
+    _set_config_dict_common(
+        cfg, config_dict,
+        location_id,
+        year,
+        uf_table_df
     )
 
-    return rt_df
+    # --- Override parameters found in stage 1
+    param_ranges: dict = config_dict["sampling"]["param_ranges"]
+    _sampling = config_dict["sampling"]
+    nuisance_param_names = [
+        p for p in param_ranges.keys()
+        if p not in cfg.stage2_free_params
+    ]
+    for param_name in nuisance_param_names:
+        # Set max likelihood value from stage 1 as fixed value for this stage
+        # (Try to guess parameter location from its name)
+        if param_name.startswith("rt_"):
+            sub_d = _d["reproduction_number"]["params"]
+        elif param_name.startswith("notif_"):
+            sub_d = _d["observation_model"]["params"]
+        else:
+            raise ValueError(f"Cannot guess parameter location for {param_name}")
+        sub_d[param_name] = stage1_outputs.max_ll_params[param_name]
+
+    # Manually clear exploration parameters, we'll sample them separately
+    overdisp_range = param_ranges.get("notif_nb_overdispersion", [0.1, 100.0])
+    param_ranges.clear()
+
+
+    _d["simulation"]["num_simulations"] = cfg.stage3_num_simulations
+    _scoring = _d["scoring"]
+    _scoring["metrics"] = ["nb_loglikelihood", "coverages"]
+
+    # --- Create simulator object with modified configuration dictionary
+    simulator = RenewalSimulator.from_config_dict(config_dict)
+    sim_cfg = simulator.config
+
+    # ====
+
+    # --- Build auxiliary data frames for simulations
+    params_df = build_calibration_params_df(sim_cfg.num_simulations, sim_cfg.sampling)
+    sim_cfg.num_simulations = num_simulations = params_df.shape[0]  # Update in case sampling method changes number of simulations
+    initial_infec_df = build_initial_infec_df(
+        sim_cfg.num_simulations,
+        simulator._gt_max_steps,
+        sim_cfg.temporal.step_dt,
+        sim_cfg.initial_infections
+    )
+
+    # --- Override params_df with the manually sampled stuff
+    # Random independent sampling: KDE x Overdispersion
+    n_samples = params_df.shape[0]
+    rng = np.random.default_rng(321)  # TODO: create a seed parameter
+    kde_param_samples = stage2_outputs.posterior_kde.resample(n_samples, seed=rng).T
+    # Sample overdispersion inversely
+    overdisp_param_samples = 1. / (
+        rng.uniform(1. / overdisp_range[1], 1. / overdisp_range[0], size=n_samples)
+    )
+    params_df[cfg.stage2_free_params] = kde_param_samples
+    params_df["notif_nb_overdispersion"] = overdisp_param_samples
+
+    # ====
+    # --- RUN
+    results = simulator.run_sequential_chunks(
+        params_df=params_df,
+        initial_infec_df=initial_infec_df,
+        observations_sr=observations_sr,
+    )
+
+    df = pd.concat([params_df, results.scoring.summary], axis=1)
+
+    # --- Test: Maximum NB likelihood
+    # TODO: Formalize parameter selection / posterior calculation
+    i_max = df["coverage_loglikelihood"].idxmax()
+    best_sim = results.case_beam_df.xs(i_max, level="i_simulation")
+
+    fig, ax = plt.subplots()
+    _obs = observations_sr.loc[sim_cfg.temporal.sim_start:sim_cfg.temporal.calibration_end]
+    ax.plot(_obs.index, _obs.values, "ks", label="Observations")
+    ax.plot(best_sim.loc[0.5].T, color="darkslateblue", alpha=0.7, label="Best sim")
+    ax.fill_between(
+        best_sim.columns,
+        best_sim.loc[0.25], best_sim.loc[0.75],
+        color="darkslateblue", alpha=0.3, label="50% CI"
+    )
+    ax.fill_between(
+        best_sim.columns,
+        best_sim.loc[0.025], best_sim.loc[0.975],
+        color="darkslateblue", alpha=0.3, label="95% CI"
+    )
+
+    fig.tight_layout()
+    dir = Path(f".local/calibrate_multistage/{location_id}_{year}")
+    dir.mkdir(exist_ok=True, parents=True)
+    fig.savefig(dir / "stage3_best_sim.pdf")
+    plt.close(fig)
+
 
 
 if __name__ == "__main__":
