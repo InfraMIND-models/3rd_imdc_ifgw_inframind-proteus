@@ -97,7 +97,7 @@ initial_infections:
 observation_model:
   model: negative_binomial
   params:
-    notif_nb_overdispersion: 100.0
+    notif_nb_overdispersion: 1000.0
     notif_scaling_factor:     250.
     notif_relative_scale:  5.328036  # 1.0    # scaling = relative_scaling * population / 100k
 

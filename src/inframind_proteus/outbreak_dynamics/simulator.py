@@ -521,6 +521,7 @@ class RenewalSimulator:
         infec_sim = infec_vec[:, gt_steps:]  # (num_sim, num_steps)
 
         cases_vec, case_beam_df = self._apply_observation_model(
+        # case_beam_df = self._apply_observation_model(
             infec_sim, _params, rng,
             population_size=cfg.location.population_size,
             reference_population_size=cfg.observation_model.reference_population_size,
@@ -680,6 +681,7 @@ class RenewalSimulator:
         population_size: int | None = None,
         reference_population_size: int = int(1E5)
     ) -> tuple[np.ndarray, pd.DataFrame]:
+    # ) -> pd.DataFrame:
         """Apply the negative-binomial observation (notification) model.
 
         Parameters
@@ -729,7 +731,7 @@ class RenewalSimulator:
             # Directly provided scaling factor
             scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
 
-        # Expected reported cases; clip to avoid negative expectations
+        # Expected reported cases; clip to avoid negative expectancies
         expectancy = np.clip(infec_vec * scale_f, 0.0, None)
 
         # NB success probability: p = n / (n + μ)
@@ -755,6 +757,7 @@ class RenewalSimulator:
         )
 
         return cases_vec, case_beam_df
+        # return case_beam_df
 
     @staticmethod
     def score_simulations(
