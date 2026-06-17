@@ -63,7 +63,7 @@ class DiseaseTimeSeriesCache:
 
     def __init__(
             self,
-            disease_cases_dir: Path,
+            disease_cases_dir: Path = Path("data/disease/dengue_cases_uf_weekly"),
             fname_fmt: str = "dengue_{location_id}.csv",
             variables: DiseaseTimeSeriesVariables | None = None,
     ):

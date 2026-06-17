@@ -25,7 +25,7 @@ def main():
     # ================
 
     base_config_path = Path("configs/prototype_run_dynamic_model.yaml")
-    base_config_dict = load_yaml_dict(Path("configs/prototype_run_dynamic_model.yaml"))
+    base_config_dict = load_yaml_dict(Path(base_config_path))
     # cases_cache = DiseaseTimeSeriesCache(Path("data/disease/dengue_cases_uf_weekly"))
 
     zero_date_epiweek = 41
