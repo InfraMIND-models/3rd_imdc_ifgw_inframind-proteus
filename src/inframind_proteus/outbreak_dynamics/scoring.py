@@ -186,6 +186,7 @@ def coverages_vectorized(
     simulations_df: pd.DataFrame,
     observations_sr: pd.Series,
     alphas: np.ndarray | None = None,
+    calculate_coverage_likelihood: bool = True,
 ) -> pd.DataFrame:
     """Compute empirical coverage of case beam quantiles.
 
@@ -236,6 +237,28 @@ def coverages_vectorized(
         sr_list.append(sr)
 
     coverages_df = pd.concat(sr_list, axis=1)
+
+    # ----
+    if calculate_coverage_likelihood:
+        num_obs = simulations_df.shape[1]
+        coverage_ll_sr = pd.Series(
+            0., index=coverages_df.index, name="coverage_loglikelihood"
+        )
+
+        for alpha in alphas:
+            pi_width = 1.0 - alpha
+            coverage_col = f"coverage_{pi_width:0.3f}"
+            # Recover from mean to total number of covered points
+            covered_sr = coverages_df[coverage_col] * num_obs
+
+            # Calculate loglikelihood for this pi_width
+            coverage_ll_sr += scipy.stats.binom.logpmf(
+                k=covered_sr.astype(int),
+                n=num_obs,
+                p=pi_width,
+            )
+
+        coverages_df = pd.concat([coverages_df, coverage_ll_sr], axis=1)
 
     return coverages_df
 

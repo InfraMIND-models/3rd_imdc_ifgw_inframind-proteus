@@ -45,9 +45,9 @@ class ProgramConfig:
     ncpus = 2
 
     # ---
-    stage1_num_simulations = 2**20
+    stage1_num_simulations = 2**19
 
-    stage2_num_simulations = 2**20
+    stage2_num_simulations = 2**19
     stage2_free_params = [
         "rt_logist_r_high",
         "rt_logist_start",
@@ -217,10 +217,10 @@ def run_calibration_for_location_year(
         observations_sr=observations_sr,
         uf_table_df=uf_table_df,
     )
-
     gc.collect()
 
     # Stage 2: Strict parameter explor., fixing nuisance params from stage 1
+    # ==============
     stage2_outputs = run_calibration_stage_2(
         location_id, year,
         cfg=cfg,
@@ -229,6 +229,116 @@ def run_calibration_for_location_year(
         uf_table_df=uf_table_df,
         stage1_outputs=stage1_outputs,
     )
+    gc.collect()
+
+    # Stage 3: Confidence interval adjustment
+    # ==============
+
+    # == TESTS/PROTOTYPES
+    print("\tTesting stage 3: confidence interval adjustment")
+
+    # Random orthogonal sampling: KDE x Overdispersion
+    n_samples = 100000
+    overdisp_range = [0.1, 100.0]
+    rng =  np.random.default_rng(321)
+    kde_param_samples = stage2_outputs.posterior_kde.resample(n_samples, seed=rng).T
+    overdisp_param_samples = 1. / (
+        rng.uniform(1. / overdisp_range[1], 1. / overdisp_range[0], size=n_samples)
+    )
+
+    config_dict = _d = deepcopy(base_config_dict)
+
+    # --- Set configuration for this stage
+    _set_config_dict_common(
+        cfg, config_dict,
+        location_id,
+        year,
+        uf_table_df
+    )
+
+    # --- Override parameters found in stage 1
+    param_ranges: dict = config_dict["sampling"]["param_ranges"]
+    # param_ranges[]  # TODO: Rebuild
+    _sampling = config_dict["sampling"]
+    nuisance_param_names = [
+        p for p in param_ranges.keys()
+        if p not in cfg.stage2_free_params
+    ]
+    for param_name in nuisance_param_names:
+        # Set max likelihood value from stage 1 as fixed value for this stage
+        # (Try to guess parameter location from its name)
+        if param_name.startswith("rt_"):
+            sub_d = _d["reproduction_number"]["params"]
+        elif param_name.startswith("notif_"):
+            sub_d = _d["observation_model"]["params"]
+        else:
+            raise ValueError(f"Cannot guess parameter location for {param_name}")
+        sub_d[param_name] = stage1_outputs.max_ll_params[param_name]
+
+    # Manually clear exploration parameters, we'll sample them here
+    param_ranges.clear()
+
+
+    _d["simulation"]["num_simulations"] = n_samples
+    _scoring = _d["scoring"]
+    _scoring["metrics"] = ["nb_loglikelihood", "coverages"]
+
+    # --- Create simulator object with modified configuration dictionary
+    simulator = RenewalSimulator.from_config_dict(config_dict)
+    sim_cfg = simulator.config
+
+    # ====
+
+    # --- Build auxiliary data frames for simulations
+    params_df = build_calibration_params_df(sim_cfg.num_simulations, sim_cfg.sampling)
+    # Override params_df with the manually sampled stuff
+    params_df[cfg.stage2_free_params] = kde_param_samples
+    params_df["notif_nb_overdispersion"] = overdisp_param_samples
+
+    sim_cfg.num_simulations = num_simulations = params_df.shape[0]  # Update in case sampling method changes number of simulations
+    initial_infec_df = build_initial_infec_df(
+        sim_cfg.num_simulations,
+        simulator._gt_max_steps,
+        sim_cfg.temporal.step_dt,
+        sim_cfg.initial_infections
+    )
+
+    # ====
+    # --- RUN
+    results = simulator.run_sequential_chunks(
+        params_df=params_df,
+        initial_infec_df=initial_infec_df,
+        observations_sr=observations_sr,
+    )
+
+    df = pd.concat([params_df, results.scoring.summary], axis=1)
+
+    # --- Test: Maximum NB likelihood
+    i_max = df["coverage_loglikelihood"].idxmax()
+    best_sim = results.case_beam_df.xs(i_max, level="i_simulation")
+
+    fig, ax = plt.subplots()
+    _obs = observations_sr.loc[sim_cfg.temporal.sim_start:sim_cfg.temporal.calibration_end]
+    ax.plot(_obs.index, _obs.values, "ks", label="Observations")
+    ax.plot(best_sim.loc[0.5].T, color="darkslateblue", alpha=0.7, label="Best sim")
+    ax.fill_between(
+        best_sim.columns,
+        best_sim.loc[0.25], best_sim.loc[0.75],
+        color="darkslateblue", alpha=0.3, label="50% CI"
+    )
+    ax.fill_between(
+        best_sim.columns,
+        best_sim.loc[0.025], best_sim.loc[0.975],
+        color="darkslateblue", alpha=0.3, label="95% CI"
+    )
+
+
+    fig.show()
+
+    assert True
+
+
+
 
 
 @dataclass
@@ -246,7 +356,7 @@ def run_calibration_stage_1(
 ) -> Stage1Outputs:
     print(f"\trun_calibration_stage_1(({location_id}, {year}))")
 
-    observations_sr = DiseaseTimeSeriesCache().get_location(location_id)
+    # observations_sr = DiseaseTimeSeriesCache().get_location(location_id)
     config_dict = _d = deepcopy(base_config_dict)
 
     # --- Set configuration for this stage
@@ -368,7 +478,7 @@ def run_calibration_stage_2(
 ):
     print(f"\trun_calibration_stage_2(({location_id}, {year}))")
 
-    observations_sr = DiseaseTimeSeriesCache().get_location(location_id)
+    # observations_sr = DiseaseTimeSeriesCache().get_location(location_id)
     config_dict = _d = deepcopy(base_config_dict)
 
     # --- Set configuration for this stage
