@@ -281,7 +281,6 @@ def run_calibration_for_location_year(
     )
 
 
-
 @dataclass
 class Stage1Outputs:
     max_ll_params: pd.Series

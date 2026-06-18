@@ -103,6 +103,10 @@ scoring:
 output:
   main_dir: "outputs/prototype_run_dynamic_model"
 
+  # Data to keep in the output structure (python)
+  keep_rt_trajectories: true
+
+  # Data to save to disk
   save_infec_trajectories: false
   save_cases_trajectories: false
   save_case_beam: true

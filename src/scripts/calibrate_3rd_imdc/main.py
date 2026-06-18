@@ -48,6 +48,13 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
         help="Path to the calibration YAML configuration file.",
     )
 
+    parser.add_argument(
+        "--output-dir", "--out", "-o",
+        default=ProgramConfig.output_dir,
+        type=Path,
+        help="Path to the output directory.",
+    )
+
     # --- Generic nested `--set` argument.
     parser.add_argument(
         "--set",

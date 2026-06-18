@@ -145,9 +145,14 @@ class OutputConfig(BaseConfig):
     ----------
     main_dir:
         Main output directory under which all results will be saved.
+    keep_rt_trajectories:
+        Whether to keep the full R(t) trajectories for all simulations
+        in the output data structure. Uses more memory if true.
     """
 
     main_dir: Path = Path("outputs/_DEFAULT")
+
+    keep_rt_trajectories: bool = False
 
 
 @dataclass
@@ -259,6 +264,9 @@ class SimulationOutput:
 
     Attributes
     ----------
+    rt_df:
+        Reproduction number trajectories for all simulations.
+        ``None`` if ``config.output.keep_rt_trajectories`` is ``False``.
     infec_df:
         Abstract infection counts.
         Index = ``i_simulation``, columns = time step values in days.
@@ -273,12 +281,12 @@ class SimulationOutput:
     config:
         The :class:`SimulationConfig` used to produce these outputs.
     """
-
     infec_df: pd.DataFrame
     cases_df: pd.DataFrame
     case_beam_df: pd.DataFrame
     scoring: SimulationScoring | None
     config: SimulationConfig
+    rt_df: pd.Dataframe | None = None
 
     @classmethod
     def concat(
@@ -483,7 +491,7 @@ class RenewalSimulator:
         # 3. R(t) — shape (num_sim, gt_steps + num_steps)
         #
         # The RT time grid is in days from zero_date.  The warm-up window
-        # starts at (sim_start − gt_steps × step_dt) days from zero_date,
+        # starts at (sim_start − initial_steps × step_dt) days from zero_date,
         # so R(t) parameters such as rt_logist_start are expressed as days
         # from zero_date independently of the warm-up size.
         # ------------------------------------------------------------------
@@ -564,12 +572,32 @@ class RenewalSimulator:
         else:
             scoring = None
 
+        # Etc
+        # =============
+        if cfg.output.keep_rt_trajectories:
+            # Reproduce the time grid from the RT logistic model
+            rt_datetime_grid = pd.date_range(
+                start=(cfg.temporal.sim_start - pd.Timedelta(initial_steps * step_dt, unit="D")),
+                periods=initial_steps + num_steps,
+                freq=pd.Timedelta(step_dt, unit="D"),
+                name="date",
+            )
+            rt_df = pd.DataFrame(
+                rt_vec,
+                index=_params.index,
+                columns=rt_datetime_grid,
+            )
+        else:
+            rt_df = None
+
+
         return SimulationOutput(
             infec_df=infec_df,
             cases_df=cases_df,
             case_beam_df=case_beam_df,
             scoring=scoring,
             config=cfg,
+            rt_df=rt_df,
         )
 
     def run_sequential_chunks(
@@ -1037,7 +1065,7 @@ class RenewalSimulator:
 
         # Output config
         out_main_dir = Path(output_cfg.get("main_dir", defaults.output.main_dir))
-
+        keep_rt_trajectories = output_cfg.get("keep_rt_trajectories", defaults.output.keep_rt_trajectories)
 
         config = SimulationConfig(
             mode=mode,
@@ -1070,6 +1098,7 @@ class RenewalSimulator:
             sampling=sampling_cfg,
             output=OutputConfig(
                 main_dir=out_main_dir,
+                keep_rt_trajectories=keep_rt_trajectories,
             ),
             initial_infections=initial_infections_cfg,
             rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),

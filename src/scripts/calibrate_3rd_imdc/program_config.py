@@ -53,6 +53,9 @@ class ProgramConfig(BaseConfig):
     config_fpath: Path = Path("configs/calibrate_3rd_imdc_default.yaml")
     base_sim_config_fpath: Path = Path("configs/simulation_config_default.yaml")  # Optional path to a separate simulation config file (overrides config.sim_cfg)
 
+    output_dir: Path = Path("outputs/validation_round_calibration")
+    location_year_subdir_fmt: str = "{location_id}_{year}"
+
     uf_table_fpath = Path("data/demographic/uf_table.csv")
 
     # --- Temporal config, epiweek-based (year-agnostic)
