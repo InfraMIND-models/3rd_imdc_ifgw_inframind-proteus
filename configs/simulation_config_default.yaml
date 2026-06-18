@@ -1,0 +1,108 @@
+simulation:
+  mode: calibration            # "calibration" | "projection"
+  num_simulations: 1024 # 1024, 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
+  num_time_steps: 68           # steps after the warm-up window
+  gt_max: 49                   # maximum generation time (days)
+  rng_seed: 123
+
+# ----------------------------------------------------------------------------
+temporal:
+  # Timestamps accept: ISO date ("YYYY-MM-DD"), float days, or YYYYWW integer.
+  zero_date: "2023-10-01"
+  sim_start: "2023-07-16"
+  calibration_start: "2023-10-01"    # calibration mode only
+  calibration_end:   "2024-04-01"    # calibration mode only
+  step_dt: 7                         # days per step (7 = weekly)
+
+# ----------------------------------------------------------------------------
+location:
+  # location_id_variable: one of geocode | uf | uf_code |
+  #                        regional_geocode | macrorregional_geocode
+  location_id_variable: "uf"
+  location_id: "DF"
+  population_size: 3094325  # Population for DF (can be overridden per location)
+
+# ----------------------------------------------------------------------------
+generation_time:
+  model: constant_gamma
+  params:
+    shape: 10.0
+    scale: 1.8          # mean = shape × scale ≈ 18 days
+
+# ----------------------------------------------------------------------------
+reproduction_number:
+  model: enveloped_logistic
+  # Fixed (non-sampled) defaults — overridden by sampling.lhs_params below
+  # for dimensions that are sampled.
+  params:
+      rt_logist_start:     50.
+      rt_logist_dt_center: 29.049660
+      rt_logist_dt_end:    48.042700
+      rt_logist_w_center:  11.867424
+      rt_logist_w_env:     2.5
+      rt_logist_r_low:     0.5
+      rt_logist_r_high:    2.0
+      rt_logist_r_off:     0.881221
+
+# ----------------------------------------------------------------------------
+sampling:
+  # Parameters to explore during calibration.
+  method: sobol  # lhs, sobol
+  rng_seed: 123
+
+  # Ranges are [lower_bound, upper_bound].
+  # Listed parameters override the fixed values above.
+  param_ranges:
+
+    # --- Enveloped logistic model
+    rt_logist_r_high: [1.05, 5.0]
+    rt_logist_start: [-100, 150]
+    notif_relative_scale: [0.00001, 500.0]
+    notif_nb_overdispersion: [0.1, 100.0]
+#    rt_logist_w_env: [0.5, 20.]
+    rt_logist_r_off: [0.4, 1.0]
+    rt_logist_dt_end:  [10, 150]
+    rt_logist_dt_center:  [10, 150]
+    rt_logist_w_center:   [0.5, 50.]
+
+  param_priors:
+#    # Optional prior distributions for sampled parameters.
+#    notif_relative_scale:
+#      distribution: gamma  # normal, gamma
+#      parameters:
+#        mean: 5.0
+#        std: 1.0
+
+  # Unspecified parameters default to linear scale.
+  param_scales:
+#    notif_scaling_factor: log
+    notif_nb_overdispersion: inverse
+
+# ----------------------------------------------------------------------------
+initial_infections:
+  # Warm-up seeding method.
+  method: ones
+  # Method parameters (currently unused for "ones").
+  params: {}
+
+# ----------------------------------------------------------------------------
+observation_model:
+  model: negative_binomial
+  params:
+    notif_nb_overdispersion: 150.0
+    notif_scaling_factor:     250.
+    notif_relative_scale:  5.328036  # 1.0    # scaling = relative_scaling * population / 100k
+
+# ----------------------------------------------------------------------------
+scoring:
+  metrics: ["wis", "rmse", "coverages", "nb_loglikelihood"]
+  case_beam_quantiles: [0.025, 0.25, 0.5, 0.75, 0.975]
+
+# ----------------------------------------------------------------------------
+output:
+  main_dir: "outputs/prototype_run_dynamic_model"
+
+  save_infec_trajectories: false
+  save_cases_trajectories: false
+  save_case_beam: true
+  save_scores: true          # written only in calibration mode

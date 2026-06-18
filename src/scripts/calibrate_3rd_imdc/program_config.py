@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from inframind_proteus import BaseConfig
+
+
+class Stage1Config(BaseConfig):
+    """Stage 1 configuration: Broad exploration most free
+    parameters."""
+
+    num_simulations: int = 2 ** 12
+
+
+class Stage2Config(BaseConfig):
+    """Stage 2 configuration: Focused exploration of a subset of
+    free parameters.
+
+    Nuisance parameters are fixed to optimal values
+    provided by stage 1.
+    """
+    num_simulations: int = 2 ** 12
+
+    free_params: list[str] =[
+        "rt_logist_r_high",
+        "rt_logist_start",
+        # "notif_nb_overdispersion",
+        # "notif_relative_scale",
+    ]
+    ll_temperature: float = 1.  # Higher values flatten the likelihood distribution
+    rel_weight_cutoff: float = 1e-3  # Cutoff relative to maximum weight
+
+    # Posterior building
+    sampling_seed: int = 42  # Seed for any sampling procedure in stage 2 (e.g. KDE sampling)
+    min_samples_to_kde: int = 1000  # Minimum number of samples to keep after cutoff (overrides cutoff if not met)
+    max_samples_to_kde: int = 5000  # Maximum number of samples to keep, avoids heavy KDE calculation
+
+
+class Stage3Config(BaseConfig):
+    """Stage 3 configuration: Adjustment of confidence
+    intervals to match coverages.
+    """
+    stage3_num_simulations: int = 2 ** 12
+
+
+
+class ProgramConfig(BaseConfig):
+    """Internal configuration data class for the calibration procedure script."""
+    config_fpath: Path = Path("configs/calibrate_3rd_imdc_default.yaml")
+    base_sim_config_fpath: Path = Path("configs/simulation_config_default.yaml")  # Optional path to a separate simulation config file (overrides config.sim_cfg)
+
+    uf_table_fpath = Path("data/demographic/uf_table.csv")
+
+    # --- Temporal config, epiweek-based (year-agnostic)
+    zero_date_epiweek: int = 41  # Reference date for t = 0 (not simulation start)
+    sim_start_epiweek: int = 26  # Note: Train data for each season ends at epiweek 25.
+    calibration_start_epiweek: int = 41
+    calibration_end_epiweek: int = 40  # Of the next year
+
+    # --- Locations and years to run
+    # use_location_ids = ["SP", "SE", "MG", "PA"]  # Runs all!
+    use_location_ids: list[str] = ["MG"]
+    # use_location_ids = []  # Runs all!
+    exclude_location_ids: list[str] = list()
+    use_years = list(range(2022, 2023))
+    # use_years = list(range(2016, 2023))
+    ncpus = 1
+
+    stage1: Stage1Config = Stage1Config()
+    stage2: Stage2Config = Stage2Config()
+    stage3: Stage3Config = Stage3Config()
+
+    def preprocess(self, *args, **kwargs):
+        super().preprocess(*args, **kwargs)
+
+        # # If a separate simulation config file is provided,
+        # #    load it and REPLACE sim_cfg.
+        # #    Obs: For compatibility it cannot just update, otherwise the
+        # #    validation `from_config_dict()` would not be called.
+        # if self.sim_config_fpath is not None:
+        #     sim_config_dict = load_yaml_dict(self.sim_config_fpath)
+        #     # self.sim_cfg.update_from_dict(sim_config_dict)  # Wont call validation
+        #     self.sim_cfg = SimulationConfig.from_dict(sim_config_dict)

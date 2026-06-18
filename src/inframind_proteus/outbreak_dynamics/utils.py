@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any
 
+from epiweeks import Week as EpiWeek
 import pandas as pd
 from pathos.multiprocessing import ProcessPool
 import yaml
@@ -21,7 +22,13 @@ import yaml
 # Timestamp parsing
 # ---------------------------------------------------------------------------
 
-def epiweek_to_date(epiweek_int: int) -> pd.Timestamp:
+def year_week_to_date(year: int, week: int) -> pd.Timestamp | pd.NaT:
+    """"""
+    # return EpiWeek(year, week).startdate().isoformat()
+    return pd.Timestamp(EpiWeek(year, week, system="cdc").startdate())
+
+
+def epiweek_to_date(epiweek_int: int) -> pd.Timestamp | pd.NaT:
     """Convert a YYYYWW integer to the start date (Sunday) of that CDC epiweek.
 
     Parameters
@@ -35,11 +42,11 @@ def epiweek_to_date(epiweek_int: int) -> pd.Timestamp:
     pd.Timestamp
         Sunday that opens the given CDC epiweek.
     """
-    from epiweeks import Week
 
-    year = epiweek_int // 100
-    week = epiweek_int % 100
-    return pd.Timestamp(Week(year, week, system="cdc").startdate())
+    return year_week_to_date(year=epiweek_int // 100, week=epiweek_int % 100)
+    # year =
+    # week = epiweek_int % 100
+    # return pd.Timestamp(EpiWeek(year, week, system="cdc").startdate())
 
 
 def parse_timestamp(

@@ -496,17 +496,18 @@ class TestParseCalibrationSamplingConfigWithScale:
         parsed = parse_calibration_sampling_config(config_dict)
         assert parsed.param_scales == {}
 
-    def test_parse_invalid_scale_type_raises(self):
-        """Invalid scale type should raise ValueError."""
-        config_dict = {
-            "simulation": {"num_simulations": 10},
-            "sampling": {
-                "param_ranges": {"x": [1.0, 10.0]},
-                "param_scales": {"x": "exponential"},
-            },
-        }
-        with pytest.raises(ValueError, match="must be 'linear' or 'log'"):
-            parse_calibration_sampling_config(config_dict)
+    # # Deprecated test: Validation is not done at parsing time
+    # def test_parse_invalid_scale_type_raises(self):
+    #     """Invalid scale type should raise ValueError."""
+    #     config_dict = {
+    #         "simulation": {"num_simulations": 10},
+    #         "sampling": {
+    #             "param_ranges": {"x": [1.0, 10.0]},
+    #             "param_scales": {"x": "exponential"},
+    #         },
+    #     }
+    #     with pytest.raises(ValueError, match="must be 'linear' or 'log'"):
+    #         parse_calibration_sampling_config(config_dict)
 
     def test_parse_scale_case_insensitive(self):
         """Scale types should be case-insensitive."""

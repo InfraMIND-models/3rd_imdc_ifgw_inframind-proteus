@@ -33,7 +33,7 @@ dev = [
 ]
 
 [project.scripts]
-calibrate-3rd-imdc = "scripts.calibrate_3rd_imdc:main"
+calibrate-3rd-imdc = "scripts.calibrate_3rd_imdc.main:main"
 
 
 [build-system]

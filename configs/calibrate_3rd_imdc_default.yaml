@@ -1,0 +1,10 @@
+
+# SimulationConfig dictionary to serve as template for simulation calls.
+#base_sim_config_fpath: "configs/simulation_config_default.yaml"
+
+use_location_ids: ["SP", "SE", "MG", "PA"]
+
+#ncpus: 4
+
+stage1:
+    num_simulations: 1024
