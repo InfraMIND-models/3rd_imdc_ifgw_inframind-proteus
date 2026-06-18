@@ -33,6 +33,9 @@ from scripts.calibrate_3rd_imdc.program_config import ProgramConfig
 from scripts.calibrate_3rd_imdc.calibration_stage_1 import (
     run_calibration_stage_1, Stage1Outputs
 )
+from scripts.calibrate_3rd_imdc.calibration_stage_2 import (
+    run_calibration_stage_2, Stage2Outputs
+)
 
 
 def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
@@ -162,7 +165,7 @@ def run_calibration_stages_location_year(
 
     # --- Stage 1
     s1_xt0 = time.time()
-    run_calibration_stage_1(
+    stage1_outputs = run_calibration_stage_1(
         location_id, year,
         cfg=cfg,
         base_sim_config_dict=base_sim_config_dict,
@@ -170,6 +173,18 @@ def run_calibration_stages_location_year(
         uf_table_df=uf_table_df
     )
     s1_xt1 = time.time()
+
+    # --- Stage 2
+    s2_xt0 = time.time()
+    stage2_outputs = run_calibration_stage_2(
+        location_id, year,
+        cfg=cfg,
+        base_sim_config_dict=base_sim_config_dict,
+        observations_sr=observations_sr,
+        uf_table_df=uf_table_df,
+        stage1_outputs=stage1_outputs
+    )
+    s2_xt1 = time.time()
 
 
 

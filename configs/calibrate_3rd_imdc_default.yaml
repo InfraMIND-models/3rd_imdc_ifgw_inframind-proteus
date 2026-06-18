@@ -7,4 +7,5 @@ use_location_ids: ["SP", "SE", "MG", "PA"]
 #ncpus: 4
 
 stage1:
-    num_simulations: 2048  # 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
+    num_simulations: 4096  # 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
+
