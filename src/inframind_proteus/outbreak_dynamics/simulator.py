@@ -38,7 +38,7 @@ from .initial_infections import (
     parse_initial_infections_config,
 )
 from .rt_models import BaseRT, LogisticRT, get_rt_model
-from .sampling import SamplingConfig, parse_calibration_sampling_config
+from .sampling import SamplingConfig, parse_calibration_sampling_config, build_calibration_params_df
 from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized, \
     coverages_vectorized
 from .utils import parse_timestamp, save_yaml_dict
@@ -611,6 +611,37 @@ class RenewalSimulator:
             step_dt=self._step_dt,
             initial_config=self.config.initial_infections,
         )
+
+    def build_simulation_data(
+            self,
+            config: SimulationConfig = None,
+            simulator: RenewalSimulator= None,
+    ):
+        """Build auxiliary data frames for simulations.
+
+        This method replaces commonly used code for setting up
+        a simulation.
+        """
+        # ---
+        config = config or self.config
+        simulator = simulator or self
+
+        # Data frame with all model parameters
+        params_df = build_calibration_params_df(
+            config.num_simulations, config.sampling
+        )
+        # Re-assign num_simulations, since prev. step may change it
+        config.num_simulations = params_df.shape[0]
+
+        # Initial infections for the warm-up window
+        initial_infec_df = build_initial_infec_df(
+            config.num_simulations,
+            # config.initial_infections,
+            config.temporal.step_dt,
+            config.initial_infections
+        )
+
+        return params_df, initial_infec_df
 
     @staticmethod
     def _run_renewal_loop(

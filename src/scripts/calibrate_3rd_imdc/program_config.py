@@ -11,6 +11,10 @@ class Stage1Config(BaseConfig):
 
     num_simulations: int = 2 ** 12
 
+    # Number of data points in the pre-simulation period
+    # This is used to determine the prior for the notif_relative_scale parameter
+    presim_period_num_points: int = 6
+
 
 class Stage2Config(BaseConfig):
     """Stage 2 configuration: Focused exploration of a subset of

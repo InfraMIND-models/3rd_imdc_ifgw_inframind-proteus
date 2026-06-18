@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import sys
+import time
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,12 +23,16 @@ from typing import Any, Optional
 import pandas as pd
 
 from inframind_proteus import BaseConfig
+from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.utils import (
     parse_set_arguments_with_yaml, load_yaml_dict, year_week_to_date,
     apply_include_exclude_logic, map_parallel_or_sequential
 )
 from scripts.calibrate_3rd_imdc.program_config import ProgramConfig
+from scripts.calibrate_3rd_imdc.calibration_stage_1 import (
+    run_calibration_stage_1, Stage1Outputs
+)
 
 
 def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
@@ -114,12 +119,13 @@ def main(argv: list[str] | None = None) -> None:
     # --- Run calibration algorithm for all location-year combinations
     def _task(location_year_tuple):
         location_id, year = location_year_tuple
-        run_calibration_stages(
+        run_calibration_stages_location_year(
             location_id, year,
             cfg=cfg,
             base_sim_config_dict=data.base_sim_config_dict,
-            uf_table_df=data.uf_table_df,
+            uf_table_df=data.uf_table_df
         )
+
     _contents = data.location_year_index
     map_parallel_or_sequential(
         _task, _contents,
@@ -128,50 +134,43 @@ def main(argv: list[str] | None = None) -> None:
     )
 
 
-# Internal auxiliary functions
-# =========================================
-def _set_config_dict_common(
-        cfg: ProgramConfig,
-        sim_config_dict: dict,
-        location_id,
-        year,
-        uf_table_df: pd.DataFrame
-):
-    """Override simulation configuration dictionary fields with parameters
-    that are common to all calibration stages.
-    """
-    _d = sim_config_dict
-
-    def _todate(y, w):
-        return year_week_to_date(y, w).date().isoformat()
-
-    # --- Set location-specific config fields
-    _d["location"]["location_id"] = location_id
-    _d["location"]["population_size"] = (
-        uf_table_df
-        .set_index("uf")
-        .loc[location_id, f"population_{year}"]
-        .item()
-    )
-
-    # --- Set the time fields (simulation start date, calibration window, etc)
-    _temporal = _d["temporal"]
-    _temporal["zero_date"] = _todate(year, cfg.zero_date_epiweek)
-    _temporal["sim_start"] = _todate(year, cfg.sim_start_epiweek)
-    _temporal["calibration_start"] = _todate(year, cfg.calibration_start_epiweek)
-    _temporal["calibration_end"] = _todate(year + 1, cfg.calibration_end_epiweek)
-
 
 # Main routines
 # =========================
 
-def run_calibration_stages(
+def run_calibration_stages_location_year(
         location_id, year,
         cfg: ProgramConfig,
         base_sim_config_dict: dict,
         uf_table_df: pd.DataFrame,
 ):
     """"""
+    print(f"run_calibration_stages_location_year(({location_id}, {year}))")
+
+    # --- Load location/year specific data
+    observations_sr = (
+        DiseaseTimeSeriesCache()
+        .get_location(location_id)
+    )
+
+    # --- Stage 1
+    s1_xt0 = time.time()
+    run_calibration_stage_1(
+        location_id, year,
+        cfg=cfg,
+        base_sim_config_dict=base_sim_config_dict,
+        observations_sr=observations_sr,
+        uf_table_df=uf_table_df
+    )
+    s1_xt1 = time.time()
+
+
+
+    print(
+        f"Completed ({location_id}, {year}): "
+        f"stage1 {s1_xt1-s1_xt0:0.1f}s  "
+        f""
+    )
 
     pass
 
