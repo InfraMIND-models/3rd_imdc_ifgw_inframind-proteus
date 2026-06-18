@@ -7,6 +7,7 @@ Includes:
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from datetime import datetime
 from typing import Any
@@ -93,6 +94,64 @@ def save_yaml_dict(data: dict[str, Any], path: str | Path) -> None:
     """Save a dict to a YAML file."""
     with open(path, "w") as fp:
         yaml.safe_dump(data, fp)
+
+
+def parse_set_arguments_with_yaml(set_args: list[list[str]]):
+        """Parse a list of dot-notation key-value pairs into a nested dictionary.
+
+        This function is designed to handle command-line arguments for setting
+        nested configuration parameters. It takes a list of `[key, value]` pairs,
+        where the key is a string using dot notation (e.g., 'a.b.c') to specify
+        a path in a nested dictionary, and the value is a string representation
+        of the data to be set at that path.
+
+        The value string is parsed using YAML, which allows for automatic
+        type inference of numbers, booleans, lists, and dictionaries.
+
+        Parameters
+        ----------
+        set_args : list[list[str]]
+            A list of two-element lists, where each inner list contains a
+            dot-notation key and its corresponding string value.
+            Example: `[['stage1.num_simulations', '8192'], ['sim_cfg.t0', '2022-01-01']]`
+
+        Returns
+        -------
+        dict
+            A nested dictionary representing the merged configuration overrides.
+
+        Raises
+        ------
+        ValueError
+            If a value string cannot be parsed by the YAML engine.
+        """
+
+        overrides = dict()
+        for key, value in set_args:
+            d = overrides
+            parts = key.split(".")
+            for part in parts[:-1]:
+                # Advance into the nested dictionary, creating if not there
+                if part not in d:
+                    d[part] = dict()
+                d = d[part]
+
+            # Try to parse value with YAML engine
+            try:
+                # Use yaml.load to interpret types like int, float, bool, list
+                parsed_value = yaml.load(
+                    io.StringIO(value),
+                    yaml.SafeLoader
+                )
+            except yaml.parser.ParserError:
+                raise ValueError(
+                    f"Failed to parse --set argument for key '{key}': {value}"
+                )
+
+            # Add entry to the nested dictionary
+            d[parts[-1]] = parsed_value
+
+        return overrides
 
 
 def apply_include_exclude_logic(

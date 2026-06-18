@@ -53,13 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     # --- Generic dot-notation overrides
     parser.add_argument(
         "--set",
-        metavar="KEY=VALUE",
+        metavar="KEY VALUE",
         action="append",
         dest="overrides",
         default=[],
         help=(
             "Override any YAML key using dot-notation. "
-            "Repeatable: --set a.b=1 --set c=2"
+            "Repeatable: --set a.b 1 --set c 2"
         ),
     )
 
