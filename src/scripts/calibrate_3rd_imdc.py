@@ -16,6 +16,7 @@ import io
 import sys
 from argparse import ArgumentParser
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 import pydantic
@@ -23,12 +24,13 @@ import yaml.parser
 
 from inframind_proteus import BaseConfig
 from inframind_proteus.outbreak_dynamics import SimulationConfig
-from inframind_proteus.outbreak_dynamics.utils import parse_set_arguments_with_yaml
+from inframind_proteus.outbreak_dynamics.utils import parse_set_arguments_with_yaml, load_yaml_dict
 
 
 class Stage1Config(BaseConfig):
     """Stage 1 configuration: Broad exploration most free
     parameters."""
+
     num_simulations: int = 2**12
 
 
@@ -65,6 +67,8 @@ class Stage3Config(BaseConfig):
 
 class ProgramConfig(BaseConfig):
     """Internal configuration data class for the calibration procedure script."""
+    config_fpath: Path = Path("configs/calibrate_3rd_imdc_default.yaml")
+    sim_config_fpath: Optional[Path] = None  # Optional path to a separate simulation config file (overrides config.sim_cfg)
 
     sim_cfg: SimulationConfig = SimulationConfig()
     stage1: Stage1Config = Stage1Config()
@@ -75,17 +79,27 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
     """Parse command-line arguments and return them as a dictionary."""
     parser = ArgumentParser()
 
+
+    # --- Config file path
+    parser.add_argument(
+        "--config-fpath", "--cfg", "-c",
+        default=ProgramConfig.config_fpath,
+        type=Path,
+        help="Path to the calibration YAML configuration file.",
+    )
+
     # --- Generic nested `--set` argument.
     parser.add_argument(
         "--set",
         nargs=2,
         action="append",
         default=list(),
-        metavar=("KEY VALUE"),
+        metavar=("KEY", "VALUE"),
         help="Set a configuration parameter using dot notation (e.g. "
              "--set stage1.num_simulations 4096)."
              " Can be used multiple times.",
     )
+
 
     # ======
 
@@ -107,30 +121,18 @@ class ProgramData:
 
 def main(argv: list[str] | None = None) -> None:
 
-    config_dict = {
-        "hello": "world",
-        "stage1": {
-            "param1": 123,
-            "param2": "abc",
-            "param3": {
-                "subparam1": 0.5,
-                "subparam2": [1, 2, 3],
-            },
-        }
-    }
+    # TEst
+    argv += "--set sim_cfg.location.location_id RIOCLAROOO".split()
 
-    # Test
-    fake_args = [
-        "--set", "stage1.param1", "456",
-        "--set", "stage1.param3.subparam2", "[4, 5, 6]",
-        "--set", "stage1.num_simulations", "42",
-    ]
-
+    # Program initialization sequence
+    args_dict = parse_args_get_dict(argv)
+    config_dict = load_yaml_dict(args_dict["config_fpath"])
     cfg = ProgramConfig()
     cfg.update_from_dict(config_dict)
-    args_dict = parse_args_get_dict(fake_args)
     cfg.update_from_dict(args_dict)
-    # cfg.update_from_dict(args.)
+    cfg.preprocess()
+
+
 
 
     pass

@@ -1,7 +1,7 @@
 # Example configuration for the inframind-proteus outbreak dynamics simulator.
 #
 # All fields can be overridden via CLI:
-#   --set section.key=value     (generic dot-notation override)
+#   --set section.key value     (generic dot-notation override)
 #   --<named-param> value       (shortcut for important parameters)
 # ----------------------------------------------------------------------------
 

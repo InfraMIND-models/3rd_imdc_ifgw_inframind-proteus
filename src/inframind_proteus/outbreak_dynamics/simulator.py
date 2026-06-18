@@ -42,6 +42,7 @@ from .sampling import SamplingConfig, parse_calibration_sampling_config
 from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized, \
     coverages_vectorized
 from .utils import parse_timestamp, save_yaml_dict
+from .. import BaseConfig
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +50,7 @@ from .utils import parse_timestamp, save_yaml_dict
 # ---------------------------------------------------------------------------
 
 @dataclass
-class TemporalConfig:
+class TemporalConfig(BaseConfig):
     """Temporal settings for a simulation run.
 
     Attributes
@@ -74,7 +75,7 @@ class TemporalConfig:
 
 
 @dataclass
-class LocationConfig:
+class LocationConfig(BaseConfig):
     """Location identification for a simulation run.
 
     Attributes
@@ -96,7 +97,7 @@ class LocationConfig:
 
 
 @dataclass
-class ObservationModelConfig:
+class ObservationModelConfig(BaseConfig):
     """Observation model configuration.
 
     Attributes
@@ -120,7 +121,7 @@ class ObservationModelConfig:
 
 
 @dataclass
-class ScoringConfig:
+class ScoringConfig(BaseConfig):
     """Scoring configuration for calibration mode.
 
     Attributes
@@ -137,7 +138,7 @@ class ScoringConfig:
     )
 
 @dataclass
-class OutputConfig:
+class OutputConfig(BaseConfig):
     """Output/export configuration.
 
     Attributes
@@ -150,7 +151,7 @@ class OutputConfig:
 
 
 @dataclass
-class SimulationConfig:
+class SimulationConfig(BaseConfig):
     """Top-level configuration for the renewal simulator.
 
     Attributes

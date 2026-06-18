@@ -142,7 +142,7 @@ def apply_set_overrides(
     config: dict[str, Any],
     overrides: list[str],
 ) -> dict[str, Any]:
-    """Apply ``--set KEY=VALUE`` overrides (dot-notation) to a config dict.
+    """Apply ``--set KEY VALUE`` overrides (dot-notation) to a config dict.
 
     Values are cast to int / float / bool when possible; otherwise kept as str.
     """
