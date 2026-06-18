@@ -488,11 +488,12 @@ class RenewalSimulator:
         # from zero_date independently of the warm-up size.
         # ------------------------------------------------------------------
         sim_start_day = float((cfg.temporal.sim_start - cfg.temporal.zero_date).days)
-        t_start = sim_start_day - gt_steps * step_dt
+        initial_steps = cfg.initial_infections.num_steps
+        t_start = sim_start_day - initial_steps * step_dt
 
         rt_vec = self.rt_model.generate(
             params_df=_params,
-            num_time_steps=gt_steps + num_steps,
+            num_time_steps=initial_steps + num_steps,
             step_dt=step_dt,
             t_start=t_start,
         )
@@ -615,8 +616,7 @@ class RenewalSimulator:
     def build_simulation_data(
             self,
             config: SimulationConfig = None,
-            simulator: RenewalSimulator= None,
-    ):
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Build auxiliary data frames for simulations.
 
         This method replaces commonly used code for setting up
@@ -624,7 +624,6 @@ class RenewalSimulator:
         """
         # ---
         config = config or self.config
-        simulator = simulator or self
 
         # Data frame with all model parameters
         params_df = build_calibration_params_df(
@@ -636,7 +635,7 @@ class RenewalSimulator:
         # Initial infections for the warm-up window
         initial_infec_df = build_initial_infec_df(
             config.num_simulations,
-            # config.initial_infections,
+            0,  # No longer in use
             config.temporal.step_dt,
             config.initial_infections
         )

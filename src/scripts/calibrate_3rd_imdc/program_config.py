@@ -70,6 +70,11 @@ class ProgramConfig(BaseConfig):
     # use_years = list(range(2016, 2023))
     ncpus = 1
 
+    # Split simulations in sequential chunks.
+    #   Use lower values to reduce RAM usage.
+    #   Use None to keep default
+    simulator_max_chunk_size: int | None = None
+
     stage1: Stage1Config = Stage1Config()
     stage2: Stage2Config = Stage2Config()
     stage3: Stage3Config = Stage3Config()

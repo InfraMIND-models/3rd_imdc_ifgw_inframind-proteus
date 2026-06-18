@@ -40,7 +40,7 @@ def _set_config_dict_common(
     _temporal["calibration_end"] = _todate(year + 1, cfg.calibration_end_epiweek)
 
     if num_simulations is not None:
-        _d["num_simulations"] = num_simulations
+        _d["simulation"]["num_simulations"] = num_simulations
 
     if scoring_metrics is not None:
-        _d["scoring_metrics"] = scoring_metrics
+        _d["scoring"]["metrics"] = scoring_metrics

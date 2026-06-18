@@ -78,6 +78,7 @@ initial_infections:
   method: ones
   # Method parameters (currently unused for "ones").
   params: {}
+  num_steps: 7  # Ideally >= gt_max in steps
 
 # ----------------------------------------------------------------------------
 observation_model:

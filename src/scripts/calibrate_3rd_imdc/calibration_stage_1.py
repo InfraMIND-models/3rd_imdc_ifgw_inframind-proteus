@@ -55,6 +55,22 @@ def run_calibration_stage_1(
         mean_rel_scaling, std_rel_scaling
     )
 
+    # --- Run the simulation and scoring
+    _kwargs = dict()
+    if cfg.simulator_max_chunk_size is not None:
+        _kwargs["max_chunk_size"] = cfg.simulator_max_chunk_size
+
+    params_df, initial_infec_df = (
+        simulator.build_simulation_data()
+    )
+    simulator.run_sequential_chunks(
+        params_df=params_df,
+        initial_infec_df=initial_infec_df,
+        observations_sr=observations_sr,
+        **_kwargs
+    )
+
+
 
 # Internal helpers
 # =================
