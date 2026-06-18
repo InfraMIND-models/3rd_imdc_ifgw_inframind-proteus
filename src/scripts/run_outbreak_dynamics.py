@@ -28,6 +28,8 @@ from typing import Any
 
 import yaml
 
+from inframind_proteus.outbreak_dynamics import RenewalSimulator
+
 
 # ---------------------------------------------------------------------------
 # Argument parser
@@ -192,9 +194,11 @@ def main(argv: list[str] | None = None) -> int:
     config_dict = apply_set_overrides(config_dict, args.overrides)
     config_dict = apply_named_overrides(config_dict, args)
 
-    # TODO: Build RT model from config_dict["reproduction_number"]
-    # TODO: Build GT model from config_dict["generation_time"]
-    # TODO: Build SimulationConfig (via RenewalSimulator.from_config_dict)
+    simulator = RenewalSimulator.from_config_dict(config_dict)
+
+    print(simulator.config.temporal.sim_start)
+
+
     # TODO: Build params_df (fixed + LHS-sampled parameters)
     # TODO: Build initial_infec_df
     # TODO: Load observations_sr if mode == "calibration"

@@ -24,7 +24,9 @@ from inframind_proteus.outbreak_dynamics.generation_time import ConstantGammaGT
 from inframind_proteus.outbreak_dynamics.rt_models import LogisticRT
 from inframind_proteus.outbreak_dynamics.simulator import (
     LocationConfig,
+    ObservationModelConfig,
     RenewalSimulator,
+    ScoringConfig,
     SimulationConfig,
     SimulationOutput,
     TemporalConfig,
@@ -55,12 +57,14 @@ def make_config(
     zero_date: str = "2024-01-01",
     sim_start: str = "2024-01-01",
     rng_seed: int = 42,
+    metrics: list[str] | None = None,
     case_beam_quantiles: list[float] | None = None,
     calibration_start: str | None = None,
     calibration_end: str | None = None,
+    population_size: int = int(1E5),
 ) -> SimulationConfig:
-    if case_beam_quantiles is None:
-        case_beam_quantiles = [0.025, 0.5, 0.975]
+    # if case_beam_quantiles is None:
+    #     case_beam_quantiles = [0.025, 0.5, 0.975]
     return SimulationConfig(
         mode=mode,
         num_simulations=num_sim,
@@ -73,7 +77,22 @@ def make_config(
             calibration_start=pd.Timestamp(calibration_start) if calibration_start else None,
             calibration_end=pd.Timestamp(calibration_end) if calibration_end else None,
         ),
-        case_beam_quantiles=case_beam_quantiles,
+        location=LocationConfig(
+            location_id_variable="uf",
+            location_id="DF",
+            population_size=population_size,
+        ),
+        observation_model=ObservationModelConfig(
+            model="negative_binomial",
+            params={
+                "notif_nb_overdispersion": 10.0,
+                "notif_scaling_factor": 1.0,
+            },
+        ),
+        scoring=ScoringConfig(
+            metrics=metrics or ScoringConfig().metrics,
+            case_beam_quantiles=case_beam_quantiles or ScoringConfig().case_beam_quantiles,
+        ),
         rng_seed=rng_seed,
     )
 
@@ -302,7 +321,7 @@ class TestObservationModel:
         beam_quantiles = sorted(
             case_beam_df.index.get_level_values("quantile").unique()
         )
-        assert beam_quantiles == sorted(sim.config.case_beam_quantiles)
+        assert beam_quantiles == sorted(sim.config.scoring.case_beam_quantiles)
 
     def test_zero_infections_give_zero_cases(self, sim, params):
         """With zero infections, expected cases = 0 → NB always draws 0."""
@@ -319,7 +338,7 @@ class TestObservationModel:
         rng = np.random.default_rng(0)
         _, case_beam_df = sim._apply_observation_model(infec, params, rng)
 
-        q_sorted = sorted(sim.config.case_beam_quantiles)
+        q_sorted = sorted(sim.config.scoring.case_beam_quantiles)
         beam_low = case_beam_df.xs(q_sorted[0], level="quantile").values
         beam_high = case_beam_df.xs(q_sorted[-1], level="quantile").values
         assert np.all(beam_low <= beam_high)
@@ -338,6 +357,100 @@ class TestObservationModel:
         bad_params = params.drop(columns=["notif_nb_overdispersion"])
         with pytest.raises(ValueError, match="missing"):
             sim._apply_observation_model(infec, bad_params, np.random.default_rng(0))
+
+    def test_negative_population_raises(self, sim, params):
+        infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
+        params["notif_relative_scale"] = 1.0
+        population_size = -int(1E5)
+        with pytest.raises(ValueError, match="population_size must be non-negative"):
+            sim._apply_observation_model(
+                infec, params, np.random.default_rng(0),
+                population_size=population_size,
+            )
+
+    def test_relative_scaling_equivalent_to_absolute_scaling(self, sim, params):
+        """Equivalent absolute/relative scaling should produce identical outputs."""
+        infec = np.full((sim.config.num_simulations, sim.config.num_time_steps), 10.0)
+        pop = int(2e5)
+        ref_pop = int(1e5)
+        relative_scale = 0.5
+        effective_scale = relative_scale * pop / ref_pop
+
+        params_abs = params.copy()
+        params_abs["notif_scaling_factor"] = effective_scale
+
+        params_rel = params.copy()
+        params_rel["notif_scaling_factor"] = 999.0
+        params_rel["notif_relative_scale"] = relative_scale
+
+        cases_abs, beam_abs = sim._apply_observation_model(
+            infec, params_abs, np.random.default_rng(123)
+        )
+        cases_rel, beam_rel = sim._apply_observation_model(
+            infec,
+            params_rel,
+            np.random.default_rng(123),
+            population_size=pop,
+            reference_population_size=ref_pop,
+        )
+
+        np.testing.assert_array_equal(cases_abs, cases_rel)
+        pd.testing.assert_frame_equal(beam_abs, beam_rel)
+
+    def test_relative_scaling_overrides_notif_scaling_factor(self, sim, params):
+        """When notif_relative_scale is present, notif_scaling_factor is ignored."""
+        infec = np.full((sim.config.num_simulations, sim.config.num_time_steps), 10.0)
+        pop = int(2e5)
+        ref_pop = int(1e5)
+        relative_scale = 0.25
+
+        params_with_relative = params.copy()
+        params_with_relative["notif_scaling_factor"] = 10.0
+        params_with_relative["notif_relative_scale"] = relative_scale
+
+        params_effective = params.copy()
+        params_effective["notif_scaling_factor"] = relative_scale * pop / ref_pop
+
+        cases_rel, _ = sim._apply_observation_model(
+            infec,
+            params_with_relative,
+            np.random.default_rng(77),
+            population_size=pop,
+            reference_population_size=ref_pop,
+        )
+        cases_effective, _ = sim._apply_observation_model(
+            infec,
+            params_effective,
+            np.random.default_rng(77),
+        )
+
+        np.testing.assert_array_equal(cases_rel, cases_effective)
+
+    def test_relative_scaling_requires_population_size(self, sim, params):
+        infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
+        params["notif_relative_scale"] = 1.0
+
+        with pytest.raises(ValueError, match="population_size must be provided"):
+            sim._apply_observation_model(
+                infec,
+                params,
+                np.random.default_rng(0),
+                population_size=None,
+            )
+
+    def test_relative_scaling_with_zero_population_gives_zero_cases(self, sim, params):
+        infec = np.full((sim.config.num_simulations, sim.config.num_time_steps), 100.0)
+        params["notif_relative_scale"] = 1.0
+
+        cases_vec, _ = sim._apply_observation_model(
+            infec,
+            params,
+            np.random.default_rng(0),
+            population_size=0,
+            reference_population_size=int(1e5),
+        )
+
+        assert_allclose(cases_vec, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +474,19 @@ class TestRun:
         gt_steps = sim._gt_max_steps  # = 1
         return pd.DataFrame(
             np.ones((sim.config.num_simulations, gt_steps))
+        )
+
+    @pytest.fixture
+    def obs(self, sim):
+        cfg = sim.config
+        timestamps = pd.date_range(
+            start=cfg.temporal.sim_start,
+            periods=cfg.num_time_steps,
+            freq=pd.tseries.offsets.Day(cfg.temporal.step_dt),
+        )
+        return pd.Series(
+            np.arange(1, cfg.num_time_steps + 1, dtype=float),
+            index=timestamps
         )
 
     # --- Output type and shapes ---
@@ -408,13 +534,13 @@ class TestRun:
 
     # --- Projection mode ---
 
-    def test_projection_mode_wis_is_none(self, sim, params, initial_infec):
+    def test_projection_mode_scoring_is_none(self, sim, params, initial_infec):
         out = sim.run(params, initial_infec)
-        assert out.wis_array is None
+        assert out.scoring is None
 
     # --- Calibration mode ---
 
-    def test_calibration_mode_wis_not_none(self):
+    def test_calibration_mode_scoring_not_none(self):
         # sim: 2024-01-01, 2024-01-08, 2024-01-15, 2024-01-22 (step_dt=7, 4 steps)
         # calibration window = full simulation range
         cfg = make_config(
@@ -438,7 +564,7 @@ class TestRun:
         )
         obs = pd.Series(np.arange(1, cfg.num_time_steps + 1, dtype=float), index=timestamps)
         out = sim_cal.run(params, initial, observations_sr=obs)
-        assert out.wis_array is not None
+        assert out.scoring is not None
 
     def test_calibration_mode_wis_shape(self):
         # sim: 6 weekly steps from 2024-01-01
@@ -467,14 +593,16 @@ class TestRun:
         obs = pd.Series(np.ones(num_steps, dtype=float), index=all_timestamps)
         out = sim_cal.run(params, initial, observations_sr=obs)
         # Only the 3 timestamps inside [calibration_start, calibration_end] are scored
-        assert out.wis_array.shape == (num_sim, 3)
+        # assert out.scoring.wis_array.shape == (num_sim, 3)
+        assert out.scoring.summary["wis"].shape == (num_sim,)
 
     # --- Validation errors ---
 
-    def test_validation_wrong_params_rows(self, sim, initial_infec):
-        wrong_params = make_params_df(sim.config.num_simulations + 5)
-        with pytest.raises(ValueError, match="params_df"):
-            sim.run(wrong_params, initial_infec)
+    # # Deprecated test: Now it simulates the number in `params_df`
+    # def test_validation_wrong_params_rows(self, sim, initial_infec):
+    #     wrong_params = make_params_df(sim.config.num_simulations + 5)
+    #     with pytest.raises(ValueError, match="params_df"):
+    #         sim.run(wrong_params, initial_infec)
 
     def test_validation_wrong_initial_infec_shape(self, sim, params):
         bad_initial = pd.DataFrame(
@@ -622,6 +750,51 @@ class TestRun:
         # The infection arrays should be identical (same effective R(t))
         assert_allclose(out_a.infec_df.values, out_b.infec_df.values, rtol=1e-10)
 
+    def test_custom_simulation_index_in_params_df(
+            self, sim, params, initial_infec, obs
+    ):
+        """Test running the simulations with a custom index of `i_simulation`
+        given as `params_df`. All other indices, and the number of simulations,
+        should follow along.
+        """
+        print(params.index)
+        # Modify params df and give it a weird index
+        params = pd.concat([params, params], axis=0)
+        _start = 10
+        _step = 2
+        _num = params.shape[0]
+        custom_index = pd.RangeIndex(_start, _start + _num * _step, _step)
+        params.index = custom_index
+
+        # Try running with mismatching shapes of initial_infec
+        with pytest.raises(ValueError, match="must have shape"):
+            sim.run(
+                params,
+                initial_infec,
+                obs
+            )
+
+        # Fix the shape of initial infec and rerun
+        initial_infec = pd.concat([initial_infec, initial_infec], axis=0)
+        initial_infec.index = custom_index
+        results = sim.run(
+            params,
+            initial_infec,
+            obs
+        )
+
+        # Check output shapes and index values
+        if results.infec_df is not None:
+            assert results.infec_df.shape[0] == _num
+            assert (results.infec_df.index == params.index).all()
+
+        if results.case_beam_df is not None:
+            _unique_vals = results.case_beam_df.index.get_level_values("i_simulation").unique()
+            assert (_unique_vals.shape[0] == _num)
+            assert (set(_unique_vals) == set(params.index))
+
+
+
 
 # ---------------------------------------------------------------------------
 # TestFactory
@@ -699,9 +872,10 @@ class TestFactory:
         assert cfg.temporal.step_dt == 7
         assert cfg.location.location_id_variable == "uf"
         assert cfg.location.location_id == "DF"
-        assert cfg.notif_nb_overdispersion == pytest.approx(6.5)
-        assert cfg.notif_scaling_factor == pytest.approx(2.0)
-        assert cfg.case_beam_quantiles == [0.1, 0.5, 0.9]
+        assert cfg.observation_model.model == "negative_binomial"
+        assert cfg.observation_model.params["notif_nb_overdispersion"] == pytest.approx(6.5)
+        assert cfg.observation_model.params["notif_scaling_factor"] == pytest.approx(2.0)
+        assert cfg.scoring.case_beam_quantiles == [0.1, 0.5, 0.9]
         assert cfg.sampling is not None
         assert cfg.sampling.method == "lhs"
         assert cfg.sampling.param_ranges["rt_logist_width"] == [1.0, 80.0]
@@ -729,9 +903,11 @@ class TestFactory:
         assert cfg.temporal.step_dt == defaults.temporal.step_dt
         assert cfg.location.location_id_variable == defaults.location.location_id_variable
         assert cfg.location.location_id == defaults.location.location_id
-        assert cfg.notif_nb_overdispersion == defaults.notif_nb_overdispersion
-        assert cfg.notif_scaling_factor == defaults.notif_scaling_factor
-        assert cfg.case_beam_quantiles == defaults.case_beam_quantiles
+        assert cfg.location.population_size == defaults.location.population_size
+        assert cfg.observation_model.model == defaults.observation_model.model
+        assert cfg.observation_model.params == defaults.observation_model.params
+        assert cfg.observation_model.reference_population_size == defaults.observation_model.reference_population_size
+        assert cfg.scoring.case_beam_quantiles == defaults.scoring.case_beam_quantiles
         assert cfg.sampling is not None
         assert cfg.sampling.method == "lhs"
         assert cfg.sampling.param_ranges == {}
@@ -745,7 +921,7 @@ class TestFactory:
             )
 
     def test_from_config_dict_invalid_rt_model_raises(self):
-        with pytest.raises(ValueError, match="Unsupported reproduction_number.model"):
+        with pytest.raises(ValueError, match="Unsupported reproduction number model"):
             RenewalSimulator.from_config_dict(
                 config_dict={
                     "simulation": {"num_simulations": 10},

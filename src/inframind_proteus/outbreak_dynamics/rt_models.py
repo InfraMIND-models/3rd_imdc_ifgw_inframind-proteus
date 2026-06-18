@@ -90,7 +90,7 @@ class LogisticRT(BaseRT):
     rt_logist_roff    : R value outside the active window (off-season baseline)
     rt_logist_start   : Day (float) at which the logistic window opens
     rt_logist_end     : Day (float) at which the logistic window closes
-    rt_logist_center  : Inflection point of the logistic (days)
+    rt_logist_center  : Inflection point of the logistic (days) after start
     rt_logist_width   : Steepness parameter (days); larger = smoother decline
     rt_logist_rmin    : Asymptotic minimum R during outbreak
     rt_logist_rmax    : Peak / "R0"-like maximum R at outbreak onset
@@ -152,8 +152,135 @@ class LogisticRT(BaseRT):
         # exp() may overflow when the exponent is very large (t far before center),
         # which is correct — the logistic saturates to rmax in that limit.
         with np.errstate(over="ignore"):
-            exponent = (rt_center - time_grid) / rt_width
+            # exponent = (rt_center - time_grid) / rt_width  # Old: Center relative to date_zero
+            exponent = (rt_start + rt_center - time_grid) / rt_width  # New: Center relative to start of active window
             logistic_vals = rt_rmax - (rt_rmax - rt_rmin) / (1.0 + np.exp(exponent))
 
         # Outside the active window R(t) = roff
         return np.where(active, logistic_vals, rt_roff)
+
+
+class EnvelopedLogisticRT(BaseRT):
+    """Negative-logistic (inverted sigmoid) R(t) with a logistic envelope for the
+     active season.
+
+    Modifies the prototype "LogisticRT" by smoothing the transitions between
+    outbreak season and off-season with a logistic envelope.
+
+    The baseline off-season value is assumed to be 1 and is not a parameter.
+
+    Defining `logistic` as:
+            logistic(t, center, width) = 1 / (1 + exp((center - t) / width))
+
+    The R(t) core logistic decay is given by:
+        C(t) = rmax - (rmax - rmin) * logistic(t, start + center, width)
+
+    And the envelope is built as:
+        E(t) = logistic(t, start, width) * (1 - logistic(t, start + end, width))
+
+    The final expresison for R(t) is:
+        R(t) = 1 + E(t) * (C(t) - 1)
+
+    Expected columns in ``params_df``
+    ----------------------------------
+    rt_logist_start   :
+        Day (float) at which the active season starts, with respect to date_zero.
+    rt_logist_dt_center :
+        Days since start of active season at which the core logistic inflects.
+    rt_logist_dt_end  :
+        Days since season center at which the active season ends.
+    rt_logist_w_center :
+        Exp width of the core logistic inflection (days); larger = smoother decline.
+    rt_logist_w_env :
+        Exp width of the envelope transitions (days); larger = smoother transition.
+    rt_logist_r_low     : Asymptotic minimum R of the core logistic.
+    rt_logist_r_high    : Asymptotic maximum R of the core logistic.
+    rt_logist_r_off     : R value outside the active season (off-season baseline).
+    """
+
+    required_params: list[str] = [
+        "rt_logist_start",
+        "rt_logist_dt_center",
+        "rt_logist_dt_end",
+        "rt_logist_w_center",
+        "rt_logist_w_env",
+        "rt_logist_r_low",
+        "rt_logist_r_high",
+        "rt_logist_r_off",
+    ]
+
+    @staticmethod
+    def logistic(t, center, width):
+        """Logistic function with value 0.5 at t=center and steepness controlled by width."""
+        with np.errstate(over="ignore"):
+            return 1.0 / (1.0 + np.exp((center - t) / width))
+
+    def generate(
+        self,
+        params_df: pd.DataFrame,
+        num_time_steps: int,
+        step_dt: int,
+        t_start: float = 0.0,
+    ) -> np.ndarray:
+        """Generate enveloped logistic R(t) trajectories.
+
+        Parameters
+        ----------
+        params_df:
+            One row per simulation; must contain all :attr:`required_params`.
+        num_time_steps:
+            Number of time steps (columns in output).
+        step_dt:
+            Duration of each time step in days.
+        t_start:
+            Day offset of the first time step from ``zero_date``.
+
+        Returns
+        -------
+        np.ndarray
+            Shape ``(num_simulations, num_time_steps)``.
+        """
+        self.validate_params(params_df)
+
+        # Time axis in days from zero_date: shape (num_time_steps,)
+        time_grid = t_start + np.arange(num_time_steps, dtype=float) * step_dt
+
+        # Per-simulation parameters, reshaped to (num_simulations, 1) for broadcasting
+        rt_start = params_df["rt_logist_start"].to_numpy()[:, np.newaxis]
+        rt_dt_center = params_df["rt_logist_dt_center"].to_numpy()[:, np.newaxis]
+        rt_dt_end = params_df["rt_logist_dt_end"].to_numpy()[:, np.newaxis]
+        rt_w_center = params_df["rt_logist_w_center"].to_numpy()[:, np.newaxis]
+        rt_w_env = params_df["rt_logist_w_env"].to_numpy()[:, np.newaxis]
+        rt_r_low = params_df["rt_logist_r_low"].to_numpy()[:, np.newaxis]
+        rt_r_high = params_df["rt_logist_r_high"].to_numpy()[:, np.newaxis]
+        rt_r_off = params_df["rt_logist_r_off"].to_numpy()[:, np.newaxis]
+
+        # Core logistic: decreasing from r_high to r_low, centered at start + dt_center
+        center_abs = rt_start + rt_dt_center
+        core_logistic = self.logistic(time_grid, center_abs, rt_w_center)
+        C_t = rt_r_high - (rt_r_high - rt_r_low) * core_logistic
+
+        # Envelope: rises at start, falls at start + dt_end
+        envelope_rise = self.logistic(time_grid, rt_start, rt_w_env)
+        # envelope_fall = 1.0 - self.logistic(time_grid, rt_start + rt_dt_end, rt_w_env)  # Old: End relative to start
+        envelope_fall = 1.0 - self.logistic(time_grid, rt_start + rt_dt_center + rt_dt_end, rt_w_env)  # New: End relative to center
+        E_t = envelope_rise * envelope_fall
+
+        # Final R(t) = off + E(t) * (C(t) - off)
+        rt_trajectory = rt_r_off + E_t * (C_t - rt_r_off)
+
+        return rt_trajectory
+
+
+# REGISTRY/factory
+# =========
+
+def get_rt_model(model_name: str) -> BaseRT:
+    """Factory function to retrieve an R(t) model by name."""
+    model_name = model_name.lower()
+    if model_name == "logistic":
+        return LogisticRT()
+    elif model_name == "enveloped_logistic":
+        return EnvelopedLogisticRT()
+    else:
+        raise ValueError(f"Unsupported reproduction number model: {model_name}")

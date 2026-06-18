@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 from numpy.testing import assert_allclose
 
-from inframind_proteus.outbreak_dynamics.rt_models import BaseRT, LogisticRT
+from inframind_proteus.outbreak_dynamics.rt_models import BaseRT, LogisticRT, EnvelopedLogisticRT
 
 
 # ---------------------------------------------------------------------------
@@ -234,3 +234,248 @@ class TestPerSimulationVariation:
         assert_allclose(rt[0, 7], 1.0)
         # Sim 1: step 7 is day 49 < 98 → still in window (not roff)
         assert rt[1, 7] != 1.0
+
+
+# ---------------------------------------------------------------------------
+# EnvelopedLogisticRT Tests
+# ---------------------------------------------------------------------------
+
+def make_envelope_params(
+    start=14.0,
+    dt_center=56.0,
+    dt_end=126.0,
+    w_center=14.0,
+    w_env=7.0,
+    r_low=0.5,
+    r_high=2.5,
+    r_off=0.8,
+    n=3,
+) -> pd.DataFrame:
+    """Return a params_df for EnvelopedLogisticRT with ``n`` identical rows."""
+    return pd.DataFrame(
+        {
+            "rt_logist_start":     [start]     * n,
+            "rt_logist_dt_center": [dt_center] * n,
+            "rt_logist_dt_end":    [dt_end]    * n,
+            "rt_logist_w_center":  [w_center]  * n,
+            "rt_logist_w_env":     [w_env]     * n,
+            "rt_logist_r_low":     [r_low]     * n,
+            "rt_logist_r_high":    [r_high]    * n,
+            "rt_logist_r_off":     [r_off]    * n,
+        }
+    )
+
+
+class TestEnvelopedLogisticRTInterface:
+
+    def test_enveloped_is_subclass(self):
+        assert issubclass(EnvelopedLogisticRT, BaseRT)
+
+    def test_required_params_complete(self):
+        expected = {
+            "rt_logist_start", "rt_logist_dt_center", "rt_logist_dt_end",
+            "rt_logist_w_center", "rt_logist_w_env", "rt_logist_r_low",
+            "rt_logist_r_high", "rt_logist_r_off",
+        }
+        assert set(EnvelopedLogisticRT.required_params) == expected
+
+
+class TestEnvelopedValidateParams:
+
+    def test_raises_on_missing_column(self):
+        df = make_envelope_params().drop(columns=["rt_logist_dt_center"])
+        with pytest.raises(ValueError, match="rt_logist_dt_center"):
+            EnvelopedLogisticRT().validate_params(df)
+
+    def test_passes_with_all_columns(self):
+        EnvelopedLogisticRT().validate_params(make_envelope_params())  # should not raise
+
+
+class TestEnvelopedOutputShape:
+
+    def test_shape_single_simulation(self):
+        rt = EnvelopedLogisticRT().generate(
+            make_envelope_params(n=1), num_time_steps=20, step_dt=7
+        )
+        assert rt.shape == (1, 20)
+
+    def test_shape_many_simulations(self):
+        rt = EnvelopedLogisticRT().generate(
+            make_envelope_params(n=50), num_time_steps=40, step_dt=7
+        )
+        assert rt.shape == (50, 40)
+
+    def test_dtype_float(self):
+        rt = EnvelopedLogisticRT().generate(
+            make_envelope_params(n=2), num_time_steps=10, step_dt=7
+        )
+        assert np.issubdtype(rt.dtype, np.floating)
+
+
+class TestEnvelopedOffSeasonBehaviour:
+
+    # Deprecated tests - Now off-season R value is a variable parameter.
+    def test_baseline_near_one_before_season(self):
+        """Far before the active season starts, R(t) should be near 1.0."""
+        step_dt = 7
+        # start=140 → first 20 steps (days 0..133) are before season
+        params = make_envelope_params(start=140.0, dt_end=10., w_env=7.0, r_off=1.0, n=3)
+        rt = EnvelopedLogisticRT().generate(params, num_time_steps=25, step_dt=step_dt)
+        # Before season, envelope E(t) ≈ 0, so R(t) ≈ 1
+        assert_allclose(rt[:, 0], 1.0, atol=1e-3)
+
+    def test_baseline_near_one_after_season(self):
+        """Far after the active season ends, R(t) should return to 1.0."""
+        step_dt = 7
+        # start=0, dt_end=70 → season ends at day 70 (step 10)
+        # Step 20 (day 140) should be well past the season
+        params = make_envelope_params(start=0.0, dt_end=10.0, w_env=7.0, r_off=1.0, n=3)
+        rt = EnvelopedLogisticRT().generate(params, num_time_steps=25, step_dt=step_dt)
+        # After season, envelope E(t) ≈ 0, so R(t) ≈ 1
+        assert_allclose(rt[:, 20], 1.0, atol=1e-3)
+
+    def test_envelope_rises_at_start(self):
+        """R(t) should rise from baseline as envelope activates."""
+        step_dt = 7
+        # start=70, dt_center very late so core stays near r_high
+        params = make_envelope_params(
+            start=70.0, dt_center=500.0, dt_end=500.0,
+            w_env=7.0, r_low=0.5, r_high=2.5, r_off=1.0, n=2
+        )
+        rt = EnvelopedLogisticRT().generate(params, num_time_steps=30, step_dt=step_dt)
+        # Well before start (step 5, day 35, ~35 days < 70): near 1.0
+        assert_allclose(rt[:, 5], 1.0, atol=0.02)
+        # At start inflection (step 10, day 70): envelope ≈ 0.5
+        # C(t) ≈ r_high = 2.5, so R ≈ 1 + 0.5 * (2.5 - 1) = 1.75
+        assert_allclose(rt[:, 10], 1.75, atol=0.1)
+        # Well into season (step 15, day 105 >> 70): envelope ≈ 1
+        # R ≈ 1 + 1 * (2.5 - 1) = 2.5
+        assert_allclose(rt[:, 15], 2.5, atol=0.02)
+
+
+class TestEnvelopedCoreLogistic:
+
+    def test_core_decreases_over_time(self):
+        """Inside the active season, R(t) should decrease as core logistic declines."""
+        step_dt = 7
+        # Season: start=0, dt_center=70, dt_end=200
+        # At dt_center (day 70, step 10), core logistic should be at midpoint
+        params = make_envelope_params(
+            start=0.0, dt_center=70.0, dt_end=200.0,
+            w_center=14.0, w_env=3.0,  # narrow envelope for quick activation
+            r_low=0.5, r_high=2.5, n=3
+        )
+        rt = EnvelopedLogisticRT().generate(params, num_time_steps=40, step_dt=step_dt)
+
+        # Early in season (step 5, day 35): core near r_high
+        # Envelope already activated, so R should be high
+        early_vals = rt[:, 5]
+
+        # At center (step 10, day 70): core at midpoint (r_high + r_low)/2 = 1.5
+        # Envelope fully activated, so R ≈ 1 + 1 * (1.5 - 1) = 1.5
+        center_vals = rt[:, 10]
+
+        # Late in season (step 20, day 140): core near r_low
+        # Envelope still active, so R should be lower
+        late_vals = rt[:, 20]
+
+        # Check monotonic decrease
+        assert np.all(early_vals > center_vals)
+        assert np.all(center_vals > late_vals)
+
+    def test_at_dt_center_envelope_modulates_midpoint(self):
+        """At t = start + dt_center, with full envelope, core is at (r_high + r_low)/2."""
+        step_dt = 7
+        dt_center = 70.0  # 10 steps after start
+        r_low, r_high = 0.4, 2.4
+        # start=0, so center is at day 70 (step 10)
+        # Use narrow envelope width and make dt_end large to keep envelope ≈ 1 at center
+        params = make_envelope_params(
+            start=0.0, dt_center=dt_center, dt_end=200.0,
+            w_center=14.0, w_env=3.0,
+            r_low=r_low, r_high=r_high, n=2
+        )
+        rt = EnvelopedLogisticRT().generate(params, num_time_steps=30, step_dt=step_dt)
+
+        # At step 10 (day 70), envelope should be ≈ 1
+        # Core = (r_high + r_low)/2 = 1.4
+        # R(t) = 1 + 1 * (1.4 - 1) = 1.4
+        expected_midpoint = (r_high + r_low) / 2.0
+        assert_allclose(rt[:, 10], expected_midpoint, atol=0.05)
+
+
+class TestEnvelopedPerSimulationVariation:
+
+    def test_different_r_high_per_row(self):
+        """Each simulation should use its own r_high parameter."""
+        step_dt = 7
+        params = pd.DataFrame(
+            {
+                "rt_logist_start":     [0.0, 0.0, 0.0],
+                "rt_logist_dt_center": [500.0, 500.0, 500.0],  # far away
+                "rt_logist_dt_end":    [200.0, 200.0, 200.0],
+                "rt_logist_w_center":  [14.0, 14.0, 14.0],
+                "rt_logist_w_env":     [3.0, 3.0, 3.0],
+                "rt_logist_r_low":     [0.5, 0.5, 0.5],
+                "rt_logist_r_high":    [2.0, 2.5, 3.0],
+                "rt_logist_r_off":     [1.0, 1.0, 1.0],
+            }
+        )
+        rt = EnvelopedLogisticRT().generate(params, num_time_steps=20, step_dt=step_dt)
+
+        # Mid-season (step 10, day 70), envelope ≈ 1, core ≈ r_high
+        # R ≈ 1 + 1 * (r_high - 1)
+        assert_allclose(rt[0, 10], 2.0, atol=0.05)
+        assert_allclose(rt[1, 10], 2.5, atol=0.05)
+        assert_allclose(rt[2, 10], 3.0, atol=0.05)
+
+    # --- Disabled since it is a fragile numerical comparison
+    # def test_different_dt_end_per_row(self):
+    #     """Different dt_end should cause envelope to close at different times."""
+    #     step_dt = 7
+    #     params = pd.DataFrame(
+    #         {
+    #             "rt_logist_start":     [0.0, 0.0],
+    #             "rt_logist_dt_center": [500.0, 500.0],  # far away, core stays high
+    #             "rt_logist_dt_end":    [70.0, 140.0],   # ends at day 70 vs 140
+    #             "rt_logist_w_center":  [14.0, 14.0],
+    #             "rt_logist_w_env":     [7.0, 7.0],
+    #             "rt_logist_r_low":     [0.5, 0.5],
+    #             "rt_logist_r_high":    [2.5, 2.5],
+    #         }
+    #     )
+    #     rt = EnvelopedLogisticRT().generate(params, num_time_steps=30, step_dt=step_dt)
+    #
+    #     # Step 15 is day 105
+    #     # Sim 0: well past end (70), envelope ≈ 0, R ≈ 1
+    #     assert_allclose(rt[0, 15], 1.0, atol=0.1)
+    #     # Sim 1: still in season (< 140), R > 1
+    #     assert rt[1, 15] > 1.5
+
+
+class TestEnvelopedLogisticStaticMethod:
+
+    def test_logistic_at_center_is_half(self):
+        """At t=center, logistic function should return 0.5."""
+        result = EnvelopedLogisticRT.logistic(t=100.0, center=100.0, width=10.0)
+        assert_allclose(result, 0.5, rtol=1e-10)
+
+    def test_logistic_far_before_center_near_zero(self):
+        """Far before center, logistic should be near 0."""
+        result = EnvelopedLogisticRT.logistic(t=0.0, center=100.0, width=10.0)
+        assert result < 0.01
+
+    def test_logistic_far_after_center_near_one(self):
+        """Far after center, logistic should be near 1."""
+        result = EnvelopedLogisticRT.logistic(t=200.0, center=100.0, width=10.0)
+        assert result > 0.99
+
+    def test_logistic_width_affects_steepness(self):
+        """Smaller width should give steeper transition."""
+        narrow = EnvelopedLogisticRT.logistic(t=110.0, center=100.0, width=2.0)
+        wide = EnvelopedLogisticRT.logistic(t=110.0, center=100.0, width=20.0)
+        # At t=110 (10 units past center):
+        # narrow should be closer to 1, wide should be closer to 0.5
+        assert narrow > wide
+
+

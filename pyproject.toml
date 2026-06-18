@@ -18,15 +18,17 @@ dependencies = [
     "pandas>=2.3.3",
     "statsmodels>=0.14.6",
     "scipy>=1.16.3",
-]
-
-[project.optional-dependencies]
-dev = [
     "plotly>=6.0.0",
     "matplotlib>=3.9.4",
     "dvc>=3.59",
     "dvc-ssh",
     "numba>=0.63.1",
+    "pathos>=0.3.5",
+    "pyarrow>=23.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
 ]
 
 
@@ -41,6 +43,7 @@ packages = ["src/inframind_proteus"]
 dev = [
     "pytest>=9.0.3",
     "nbdime>=4.0.1",
+    "salib>=1.5.2",
 ]
 
 

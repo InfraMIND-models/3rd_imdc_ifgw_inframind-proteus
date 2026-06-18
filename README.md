@@ -27,6 +27,8 @@ Follow the instructions as prompted.
 python3 setup_env.py
 ```
 
+| Obs: To manually configure a uv project with development dependencies, run `uv sync --extra dev --group dev`.'
+
 Activate the environment (do that every new session):
 ```
 source .venv/bin/activate

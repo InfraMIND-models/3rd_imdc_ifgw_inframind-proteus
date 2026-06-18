@@ -20,11 +20,16 @@ Output is returned as a :class:`SimulationOutput` dataclass.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
-from typing import Literal
+from pathlib import Path
+from typing import Literal, Any
 
+import numba as nb
 import numpy as np
 import pandas as pd
+from pandas import DataFrame, Series
+from voluptuous import default_factory
 
 from .generation_time import BaseGT, ConstantGammaGT
 from .initial_infections import (
@@ -32,10 +37,11 @@ from .initial_infections import (
     build_initial_infec_df,
     parse_initial_infections_config,
 )
-from .rt_models import BaseRT, LogisticRT
+from .rt_models import BaseRT, LogisticRT, get_rt_model
 from .sampling import SamplingConfig, parse_calibration_sampling_config
-from .scoring import nbinom_ppf_cf, wis_score_vectorized
-from .utils import parse_timestamp
+from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized, \
+    coverages_vectorized
+from .utils import parse_timestamp, save_yaml_dict
 
 
 # ---------------------------------------------------------------------------
@@ -79,10 +85,68 @@ class LocationConfig:
         ``"macrorregional_geocode"``, ``"uf_code"``.
     location_id:
         Value of the location identifier.
+    population_size:
+        Population size for the simulated location. Required if using relative
+        scaling scheme for the observation model.
     """
 
     location_id_variable: str
     location_id: str | int
+    population_size: int = int(1E5)
+
+
+@dataclass
+class ObservationModelConfig:
+    """Observation model configuration.
+
+    Attributes
+    ----------
+    model:
+        Name of the observation model. Currently only ``"negative_binomial"``
+        is supported.
+    params:
+        Model-specific parameters. For negative-binomial model, this includes:
+        - ``notif_nb_overdispersion``: Overdispersion parameter
+        - ``notif_scaling_factor``: Scaling factor from infections to cases
+        - ``notif_relative_scale``: Optional relative scaling factor
+    reference_population_size:
+        Denominator for normalizing incidences per population size. Default
+        is 100k (1E5), only change this if there is a clear reason.
+    """
+
+    model: str = "negative_binomial"
+    params: dict[str, Any] = field(default_factory=dict)
+    reference_population_size: int = int(1E5)
+
+
+@dataclass
+class ScoringConfig:
+    """Scoring configuration for calibration mode.
+
+    Attributes
+    ----------
+    case_beam_quantiles:
+        Quantiles used to build the deterministic case prediction beam.
+    """
+
+    metrics: list[str] = field(
+        default_factory=lambda: ["wis", "rmse", "coverages", "nb_loglikelihood"]
+    )
+    case_beam_quantiles: list[float] = field(
+        default_factory=lambda: [0.025, 0.25, 0.5, 0.75, 0.975]
+    )
+
+@dataclass
+class OutputConfig:
+    """Output/export configuration.
+
+    Attributes
+    ----------
+    main_dir:
+        Main output directory under which all results will be saved.
+    """
+
+    main_dir: Path = Path("outputs/_DEFAULT")
 
 
 @dataclass
@@ -103,15 +167,11 @@ class SimulationConfig:
     temporal:
         Temporal settings (:class:`TemporalConfig`).
     location:
-        Location settings (:class:`LocationConfig`).
-    notif_nb_overdispersion:
-        Overdispersion parameter for the negative-binomial observation model.
-        Can be overridden per-simulation via ``params_df``.
-    notif_scaling_factor:
-        Scaling factor from abstract infections to expected reported cases.
-        Can be overridden per-simulation via ``params_df``.
-    case_beam_quantiles:
-        Quantiles used to build the deterministic case prediction beam.
+        Location settings (:class:`LocationConfig`), including population size.
+    observation_model:
+        Observation model configuration (:class:`ObservationModelConfig`).
+    scoring:
+        Scoring configuration (:class:`ScoringConfig`).
     sampling:
         Optional sampling settings parsed from ``sampling`` plus fixed
         parameter dictionaries used to build calibration ``params_df``.
@@ -137,21 +197,60 @@ class SimulationConfig:
             location_id="DF",
         )
     )
-    notif_nb_overdispersion: float = 10.0
-    notif_scaling_factor: float = 1.0
-    case_beam_quantiles: list[float] = field(
-        default_factory=lambda: [0.025, 0.25, 0.5, 0.75, 0.975]
+    observation_model: ObservationModelConfig = field(
+        default_factory=lambda: ObservationModelConfig(
+            model="negative_binomial",
+            params={
+                "notif_nb_overdispersion": 10.0,
+                "notif_scaling_factor": 1.0,
+            },
+        )
     )
+    scoring: ScoringConfig = field(default_factory=ScoringConfig)
     sampling: SamplingConfig | None = None
     initial_infections: InitialInfectionsConfig = field(
         default_factory=InitialInfectionsConfig
     )
+    output: OutputConfig = field(default_factory=OutputConfig)
     rng_seed: int = 0
 
 
 # ---------------------------------------------------------------------------
 # Output dataclass
 # ---------------------------------------------------------------------------
+
+@dataclass
+class SimulationScoring:
+    """
+    Attributes
+    ----------
+    wis_array:
+        Per-simulation WIS scores over the calibration window.  ``None`` in
+        projection mode.  Shape ``(num_simulations, n_cal)`` where ``n_cal``
+        is the number of observation timestamps that fall within
+        ``[calibration_start, calibration_end]``.
+    summary:
+        Summary scores for all simulations, with one scalar for each score
+        and for each simulation.
+        Data frame shape is ``(num_simulations, num_scores)``,
+        where ``num_scores`` is the number of calculated scores.
+    """
+    # wis_array: np.ndarray  # Deprecated. Removed to save RAM.
+    summary: pd.DataFrame
+
+    @classmethod
+    def concat(
+            cls, objs: list[SimulationScoring]
+    ) -> SimulationScoring:
+        """Concatenate multiple SimulationScoring instances into one, joining
+        through all simulations.
+
+        """
+        return cls(
+            # wis_array=np.concatenate([o.wis_array for o in objs], axis=0),
+            summary=pd.concat([o.summary for o in objs], axis=0),
+        )
+
 
 @dataclass
 class SimulationOutput:
@@ -168,11 +267,8 @@ class SimulationOutput:
     case_beam_df:
         Deterministic quantile case beam.
         MultiIndex ``(quantile, i_simulation)``, same time-step columns.
-    wis_array:
-        Per-simulation WIS scores over the calibration window.  ``None`` in
-        projection mode.  Shape ``(num_simulations, n_cal)`` where ``n_cal``
-        is the number of observation timestamps that fall within
-        ``[calibration_start, calibration_end]``.
+    scoring:
+        Scoring results for calibration mode; ``None`` in projection mode.
     config:
         The :class:`SimulationConfig` used to produce these outputs.
     """
@@ -180,13 +276,90 @@ class SimulationOutput:
     infec_df: pd.DataFrame
     cases_df: pd.DataFrame
     case_beam_df: pd.DataFrame
-    wis_array: np.ndarray | None
+    scoring: SimulationScoring | None
     config: SimulationConfig
+
+    @classmethod
+    def concat(
+            cls,
+            objs: list[SimulationOutput],
+    ) -> SimulationOutput:
+        """Concatenate multiple SimulationOutput instances into one.
+
+        This is useful for combining results from sequential chunk runs.
+
+        NOTE: This method does not modify the simulation indices. This means
+        that if the input SimulationOutput instances have overlapping simulation indices,
+        the resulting concatenated SimulationOutput will also do, possibly leading
+        to errors later.
+
+        Returns
+        -------
+        SimulationOutput
+            A new instance with concatenated data frames and arrays.
+        """
+        return cls(
+            infec_df=pd.concat([o.infec_df for o in objs], axis=0),
+            cases_df=pd.concat([o.cases_df for o in objs], axis=0),
+            case_beam_df=pd.concat([o.case_beam_df for o in objs], axis=0),
+            scoring=SimulationScoring.concat(
+                [o.scoring for o in objs if o.scoring is not None]
+            ),
+            config=objs[0].config,  # Assumes all outputs share the same config
+        )
+
+    def save(
+            self,
+            subdir_name="simulation",
+            root_dir: Path | str = Path("."),
+    ):
+        """Save/export all eligible data structures to files.
+
+        Follows the directives in config.output
+        """
+        cfg = self.config
+        out_cfg = cfg.output
+        root_dir = Path(root_dir)
+
+        # TODO: Continue this function, formalize exporting procedures.
+        raise NotImplementedError
+
+        out_main_dir = out_cfg.main_dir
+        out_dir = out_main_dir / subdir_name
+
+        # out_dir = _root / Path(config_dict["output"]["main_dir"]) / "calibration_results" / f"{location_id}_{year}"
+        out_dir.mkdir(exist_ok=True, parents=True)
+
+        # save_yaml_dict(config_dict, out_dir / "config.yaml")
+
+        # params_df.to_csv(out_dir / "params.csv.gz")  # Also kinda heavy!
+
+        # results.scoring.summary.to_parquet(out_dir / "scoring.parquet")
+        self.scoring.summary.to_csv(out_dir / "scoring.csv.gz")
+
+        # results.case_beam_df.to_csv(out_dir / "case_beam_df.csv")  # TOOOOOOOOO heavy!
+
+        # # Export only selected trajectories (case beams) to save space
+        # self.case_beam_df.reset_index().set_index("i_simulation").loc[selected_wis_sr.index].to_csv(
+        #     out_dir / "case_beam_selected_df.csv.gz")
+        # print(f"Done: {out_dir}")
+
+
 
 
 # ---------------------------------------------------------------------------
 # Simulator
 # ---------------------------------------------------------------------------
+
+def _validate_population_size(population_size):
+    if population_size is None:
+        raise ValueError(
+            "population_size must be provided when using "
+            "notif_relative_scale"
+        )
+    if population_size < 0:
+        raise ValueError(f"population_size must be non-negative. Got {population_size}.")
+
 
 class RenewalSimulator:
     """Vectorised renewal equation simulator.
@@ -232,7 +405,8 @@ class RenewalSimulator:
             Parameter table.  One row per simulation.  Must contain all
             columns required by ``rt_model``, plus
             ``notif_nb_overdispersion`` and ``notif_scaling_factor`` when
-            those should vary across simulations.
+            those should vary across simulations. May also contain the optional
+            ``notif_relative_scale`` column for relative scaling.
         initial_infec_df:
             Seed infection values for the warm-up window.
             Shape ``(num_simulations, gt_max_steps)``.
@@ -245,7 +419,8 @@ class RenewalSimulator:
         SimulationOutput
         """
         cfg = self.config
-        num_sim = cfg.num_simulations
+        # num_sim = cfg.num_simulations  # OLD.
+        num_sim = params_df.shape[0]  # Infer from params_df
         num_steps = cfg.num_time_steps
         gt_steps = self._gt_max_steps
         step_dt = self._step_dt
@@ -257,10 +432,20 @@ class RenewalSimulator:
             raise ValueError(
                 f"params_df has {params_df.shape[0]} rows; expected {num_sim}"
             )
+        # if num_sim != cfg.num_simulations:
+        #     warnings.warn(
+        #         "Number of rows in `params_df` does not match "
+        #         "config.num_simulations. Will run the number on params_df."
+        #     )
         if initial_infec_df.shape != (num_sim, gt_steps):
             raise ValueError(
                 f"initial_infec_df must have shape ({num_sim}, {gt_steps}); "
                 f"got {initial_infec_df.shape}"
+            )
+        # if not params_df.index.isin(initial_infec_df.index).all():  # contains
+        if not (initial_infec_df.index == params_df.index).all():  # exact match
+            raise ValueError(
+                "Indices of initial_infec_df and params_df must match exactly"
             )
         if cfg.mode == "calibration" and observations_sr is None:
             raise ValueError("observations_sr is required in calibration mode")
@@ -273,7 +458,7 @@ class RenewalSimulator:
                 "set when mode='calibration'"
             )
 
-        _params = params_df.copy()
+        _params: pd.DataFrame = params_df.copy()
 
         # Fill config-default observation params when not in params_df
         # NOTE: Disabled since we want to enforce presence of these parameters.
@@ -336,7 +521,10 @@ class RenewalSimulator:
         infec_sim = infec_vec[:, gt_steps:]  # (num_sim, num_steps)
 
         cases_vec, case_beam_df = self._apply_observation_model(
-            infec_sim, _params, rng
+        # case_beam_df = self._apply_observation_model(
+            infec_sim, _params, rng,
+            population_size=cfg.location.population_size,
+            reference_population_size=cfg.observation_model.reference_population_size,
         )
 
         # ------------------------------------------------------------------
@@ -349,55 +537,70 @@ class RenewalSimulator:
         )
 
         infec_df = pd.DataFrame(infec_sim, columns=sim_timestamps)
-        infec_df.index.name = "i_simulation"
+        # infec_df.index.name = "i_simulation"
+        infec_df.index = _params.index
         infec_df.columns.name = "t"
 
         cases_df = pd.DataFrame(cases_vec, columns=sim_timestamps)
-        cases_df.index.name = "i_simulation"
+        # cases_df.index.name = "i_simulation"
+        cases_df.index = _params.index
         cases_df.columns.name = "t"
 
         case_beam_df.columns = sim_timestamps
         case_beam_df.columns.name = "t"
 
         # ------------------------------------------------------------------
-        # 8. WIS scoring (calibration mode only)
+        # 8. Scoring (calibration mode only)
         # ------------------------------------------------------------------
         wis_array = None
         if cfg.mode == "calibration":
-            cal_start = cfg.temporal.calibration_start
-            cal_end   = cfg.temporal.calibration_end
-
-            # Slice observations to the declared calibration window
-            obs_cal = observations_sr.loc[
-                (observations_sr.index >= cal_start)
-                & (observations_sr.index <= cal_end)
-            ]
-            if obs_cal.empty:
-                raise ValueError(
-                    f"No observation data within the calibration window "
-                    f"[{cal_start.date()}, {cal_end.date()}]"
-                )
-
-            # Every calibration timestamp must align exactly with a simulation step
-            missing = obs_cal.index.difference(case_beam_df.columns)
-            if not missing.empty:
-                raise ValueError(
-                    f"{len(missing)} calibration timestamp(s) are absent from the "
-                    f"simulation period. Missing: {missing[:5].tolist()}"
-                )
-
-            wis_array = wis_score_vectorized(
-                simulations_df=case_beam_df[obs_cal.index],
-                observations_sr=obs_cal,
+            observations_sr: pd.Series
+            scoring = self.score_simulations(
+                cfg, case_beam_df, observations_sr, params_df
             )
+
+        else:
+            scoring = None
 
         return SimulationOutput(
             infec_df=infec_df,
             cases_df=cases_df,
             case_beam_df=case_beam_df,
-            wis_array=wis_array,
+            scoring=scoring,
             config=cfg,
         )
+
+    def run_sequential_chunks(
+            self,
+            params_df: pd.DataFrame,
+            initial_infec_df: pd.DataFrame,
+            observations_sr: pd.Series | None = None,
+            max_chunk_size: int = 10000,
+    ):
+        """"""
+
+        _iter_factory = lambda: range(0, params_df.shape[0], max_chunk_size)
+
+        params_df_chunks = [
+            params_df.iloc[i:i + max_chunk_size]
+            for i in _iter_factory()
+        ]
+        initial_infec_df_chunks = [
+            initial_infec_df.iloc[i:i + max_chunk_size]
+            for i in _iter_factory()
+        ]
+
+        results: list[SimulationOutput] = list()
+        for params_chunk, infec_chunk in zip(params_df_chunks, initial_infec_df_chunks):
+            results.append(
+                self.run(
+                    params_df=params_chunk,
+                    initial_infec_df=infec_chunk,
+                    observations_sr=observations_sr,
+                )
+            )
+
+        return SimulationOutput.concat(results)
 
     def build_initial_infec_df(self) -> pd.DataFrame:
         """Build the warm-up infection matrix using the config settings."""
@@ -407,10 +610,6 @@ class RenewalSimulator:
             step_dt=self._step_dt,
             initial_config=self.config.initial_infections,
         )
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _run_renewal_loop(
@@ -461,25 +660,28 @@ class RenewalSimulator:
         where the sum runs over ``s = 1..gt_max_steps`` (the look-back
         window), and ``w_i`` is the GT PMF row for step ``i``.
         """
-        for i_sim_step in range(num_time_steps):
-            i_full = gt_max_steps + i_sim_step
-            # Look-back window: columns [i_sim_step, i_full)
-            # Shape of each slice: (num_simulations, gt_max_steps)
-            # gt_pmf[i_sim_step] broadcasts as (gt_max_steps,)
-            infec_vec[:, i_full] = np.sum(
-                rt_vec[:, i_sim_step:i_full]
-                * infec_vec[:, i_sim_step:i_full]
-                * gt_pmf[i_sim_step],
-                axis=1,
-            )
-        return infec_vec
+        # Delegate to external function that can be numba-compiled
+        return _run_renewal_loop_numba(
+            infec_vec=infec_vec,
+            rt_vec=rt_vec,
+            gt_pmf=gt_pmf,
+            gt_max_steps=gt_max_steps,
+            num_time_steps=num_time_steps,
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _apply_observation_model(
         self,
         infec_vec: np.ndarray,
         params_df: pd.DataFrame,
         rng: np.random.Generator,
+        population_size: int | None = None,
+        reference_population_size: int = int(1E5)
     ) -> tuple[np.ndarray, pd.DataFrame]:
+    # ) -> pd.DataFrame:
         """Apply the negative-binomial observation (notification) model.
 
         Parameters
@@ -489,7 +691,10 @@ class RenewalSimulator:
             Shape ``(num_simulations, num_time_steps)`` (warm-up excluded).
         params_df:
             Parameter table with ``notif_nb_overdispersion`` and
-            ``notif_scaling_factor`` columns.
+            ``notif_scaling_factor`` columns. Optionally may contain
+            ``notif_relative_scale`` for population-relative scaling, in which
+            case ``notif_scaling_factor`` is overridden by the internal
+            algorithm.
         rng:
             NumPy random generator.
 
@@ -511,10 +716,22 @@ class RenewalSimulator:
                 f"{required_cols}; missing: {missing_cols}"
             )
 
-        overdisp = params_df["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
-        scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
 
-        # Expected reported cases; clip to avoid negative expectations
+        overdisp = params_df["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
+        # Get alternative scaling scheme
+        if "notif_relative_scale" in params_df.columns:
+            # Population-relative scaling factor
+            _validate_population_size(population_size)
+            scale_f = (
+                    params_df["notif_relative_scale"].to_numpy()[:, np.newaxis]
+                    * population_size
+                    / reference_population_size
+            )
+        else:
+            # Directly provided scaling factor
+            scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
+
+        # Expected reported cases; clip to avoid negative expectancies
         expectancy = np.clip(infec_vec * scale_f, 0.0, None)
 
         # NB success probability: p = n / (n + μ)
@@ -527,17 +744,139 @@ class RenewalSimulator:
         # Deterministic quantile beam via Cornish-Fisher approximation
         beam_frames = [
             pd.DataFrame(
-                nbinom_ppf_cf(q=q, n=overdisp, p=p, continuity=False)
+                nbinom_ppf_cf(q=q, n=overdisp, p=p, continuity=False),
+                index=params_df.index,
             )
-            for q in self.config.case_beam_quantiles
+            for q in self.config.scoring.case_beam_quantiles
         ]
+
         case_beam_df = pd.concat(
             beam_frames,
-            keys=self.config.case_beam_quantiles,
+            keys=self.config.scoring.case_beam_quantiles,
             names=["quantile", "i_simulation"],
         )
 
         return cases_vec, case_beam_df
+        # return case_beam_df
+
+    @staticmethod
+    def score_simulations(
+            cfg: SimulationConfig,
+            case_beam_df: DataFrame,
+            observations_sr: Series,
+            params_df: pd.DataFrame,
+    ) -> SimulationScoring:
+        """Score simulated trajectories against observations via WIS.
+
+        Computes per-simulation score metrics over the
+        declared calibration window using the deterministic case beam
+        quantiles produced by the observation model.
+
+        Parameters
+        ----------
+        case_beam_df:
+            Deterministic case prediction beam with MultiIndex
+            ``(quantile, i_simulation)`` and timestamp columns.
+        cfg:
+            Simulation configuration. Uses
+            ``cfg.temporal.calibration_start`` and
+            ``cfg.temporal.calibration_end`` to define the scoring window.
+        observations_sr:
+            Observed case counts indexed by timestamp.
+        params_df:
+            Data frame with parameters for the simulations, one per row.
+
+        Returns
+        -------
+        SimulationScoring
+            Scoring container with ``wis_array`` of shape
+            ``(num_simulations, n_cal)``, where ``n_cal`` is the number of
+            observation timestamps inside the calibration window.
+
+        Raises
+        ------
+        ValueError
+            If no observations fall within the calibration window.
+        ValueError
+            If any calibration timestamp in ``observations_sr`` is absent
+            from the simulation timestamps in ``case_beam_df``.
+        """
+        cal_start = cfg.temporal.calibration_start
+        cal_end = cfg.temporal.calibration_end
+
+        # Slice observations to the declared calibration window
+        obs_cal = observations_sr.loc[
+            (observations_sr.index >= cal_start)
+            & (observations_sr.index <= cal_end)
+            ]
+        if obs_cal.empty:
+            raise ValueError(
+                f"No observation data within the calibration window "
+                f"[{cal_start.date()}, {cal_end.date()}]"
+            )
+
+        # Every calibration timestamp must align exactly with a simulation step
+        missing = obs_cal.index.difference(case_beam_df.columns)
+        if not missing.empty:
+            raise ValueError(
+                f"{len(missing)} calibration timestamp(s) are absent from the "
+                f"simulation period. Missing: {missing[:5].tolist()}"
+            )
+
+        # ========
+
+        simulations_df = case_beam_df[obs_cal.index]
+        simulations_median_df = simulations_df.xs(0.5, level="quantile")
+        summary_df = pd.DataFrame(
+            {},
+            # index=simulations_df.index.get_level_values("i_simulation").unique(),
+            index=params_df.index,
+        )
+        # ^ Shape: summary_df[i_simulation, score_name] = summary score scalar value
+        # Expects that `simulations_df` is sorted by `i_simulation`.
+        # Warning: Resulting WIS values may be randomized if this is not satisfied.
+
+        # ====
+
+        # Weighted Interval Score (WIS)
+        if "wis" in cfg.scoring.metrics:
+            # Weighted Interval Scores (WIS)
+            wis_array = wis_score_vectorized(
+                simulations_df=simulations_df,
+                observations_sr=obs_cal,
+            )
+            summary_df["wis"] = wis_array.sum(axis=1)
+
+        # Root Mean Squared Error - individual components
+        if "rmse" in cfg.scoring.metrics:
+            rmse_array = rmse_vectorized(
+                simulations_df=simulations_median_df,
+                observations_sr=observations_sr,
+            )
+            summary_df["rmse"] = rmse_array
+
+        # Negative-binomial loglikelihood
+        if "nb_loglikelihood" in cfg.scoring.metrics:
+            summary_df["nb_loglikelihood"] = nb_loglikelihood_vectorized(
+                simulations_df=simulations_median_df,
+                observations_sr=observations_sr,
+                overdisp=params_df["notif_nb_overdispersion"].to_numpy(),
+            )
+
+        # Coverages of selected prediction intervals
+        if "coverages" in cfg.scoring.metrics:
+            coverages_df = coverages_vectorized(
+                simulations_df=simulations_df,
+                observations_sr=obs_cal,
+            )
+            summary_df = pd.concat([summary_df, coverages_df], axis=1)
+
+        scoring = SimulationScoring(
+            # wis_array=wis_array,
+            summary=summary_df,
+        )
+
+        return scoring
 
     # ------------------------------------------------------------------
     # Factory
@@ -564,21 +903,15 @@ class RenewalSimulator:
         sim_cfg = config_dict.get("simulation", {}) or {}
         temporal_cfg = config_dict.get("temporal", {}) or {}
         location_cfg = config_dict.get("location", {}) or {}
-        obs_params = (config_dict.get("observation_model", {}) or {}).get("params", {}) or {}
         scoring_cfg = config_dict.get("scoring", {}) or {}
         rt_cfg = config_dict.get("reproduction_number", {}) or {}
         gt_cfg = config_dict.get("generation_time", {}) or {}
         sampling_cfg = parse_calibration_sampling_config(config_dict)
         initial_infections_cfg = parse_initial_infections_config(config_dict)
+        output_cfg = config_dict.get("output", {}) or {}
 
         rt_model_name = str(rt_cfg.get("model", "logistic")).strip().lower()
-        if rt_model_name == "logistic":
-            rt_model = LogisticRT()
-        else:
-            raise ValueError(
-                "Unsupported reproduction_number.model: "
-                f"{rt_cfg.get('model')!r}. Supported models: ['logistic']"
-            )
+        rt_model = get_rt_model(rt_model_name)
 
         gt_model_name = str(gt_cfg.get("model", "constant_gamma")).strip().lower()
         gt_params = gt_cfg.get("params", {}) or {}
@@ -628,13 +961,52 @@ class RenewalSimulator:
             else defaults.temporal.calibration_end
         )
 
+        # Parse observation model configuration
+        obs_model_cfg_dict = config_dict.get("observation_model", {}) or {}
+        obs_model_name = obs_model_cfg_dict.get("model", defaults.observation_model.model)
+        obs_model_params = obs_model_cfg_dict.get("params", {}) or {}
+        
+        # Convert params to float dict, using defaults when params is empty
+        if obs_model_params:
+            obs_params_parsed = {
+                str(k): float(v) for k, v in obs_model_params.items()
+            }
+        else:
+            # Use defaults when no params provided
+            obs_params_parsed = defaults.observation_model.params.copy()
+        
+        # Get reference_population_size (currently not in YAML, using default)
+        reference_population_size = int(
+            obs_model_cfg_dict.get(
+                "reference_population_size",
+                defaults.observation_model.reference_population_size
+            )
+        )
+
+        # Parse scoring configuration
         case_beam_quantiles = [
             float(q)
             for q in scoring_cfg.get(
                 "case_beam_quantiles",
-                sim_cfg.get("case_beam_quantiles", defaults.case_beam_quantiles),
+                defaults.scoring.case_beam_quantiles,
             )
         ]
+        scoring_metrics = scoring_cfg.get(
+            "metrics",
+            defaults.scoring.metrics
+        )
+
+        # Parse population_size from location section (with fallback to simulation for transition)
+        population_size = int(
+            location_cfg.get(
+                "population_size",
+                sim_cfg.get("population_size", defaults.location.population_size)
+            )
+        )
+
+        # Output config
+        out_main_dir = Path(output_cfg.get("main_dir", defaults.output.main_dir))
+
 
         config = SimulationConfig(
             mode=mode,
@@ -653,29 +1025,95 @@ class RenewalSimulator:
                     "location_id_variable", defaults.location.location_id_variable
                 ),
                 location_id=location_cfg.get("location_id", defaults.location.location_id),
+                population_size=population_size,
             ),
-            notif_nb_overdispersion=float(
-                obs_params.get(
-                    "notif_nb_overdispersion",
-                    sim_cfg.get(
-                        "notif_nb_overdispersion",
-                        defaults.notif_nb_overdispersion,
-                    ),
-                )
+            observation_model=ObservationModelConfig(
+                model=obs_model_name,
+                params=obs_params_parsed,
+                reference_population_size=reference_population_size,
             ),
-            notif_scaling_factor=float(
-                obs_params.get(
-                    "notif_scaling_factor",
-                    sim_cfg.get(
-                        "notif_scaling_factor",
-                        defaults.notif_scaling_factor,
-                    ),
-                )
+            scoring=ScoringConfig(
+                metrics=scoring_metrics,
+                case_beam_quantiles=case_beam_quantiles,
             ),
-            case_beam_quantiles=case_beam_quantiles,
             sampling=sampling_cfg,
+            output=OutputConfig(
+                main_dir=out_main_dir,
+            ),
             initial_infections=initial_infections_cfg,
             rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),
         )
 
         return cls(rt_model=rt_model, gt_model=gt_model, config=config)
+
+
+_nb_readonly_arr = nb.types.Array(nb.types.float64, 2, 'A', readonly=True)
+@nb.njit(
+    nb.float64[:,:](
+        nb.float64[:,:],
+        nb.float64[:,:],
+        _nb_readonly_arr,
+        nb.int64,
+        nb.int64,
+    ),
+)
+def _run_renewal_loop_numba(
+    infec_vec: np.ndarray,
+    rt_vec: np.ndarray,
+    gt_pmf: np.ndarray,
+    gt_max_steps: int,
+    num_time_steps: int,
+) -> np.ndarray:
+    """Core renewal equation time loop (numba-compatible structure).
+
+    Advances ``infec_vec`` in-place through ``num_time_steps`` steps.
+
+    Parameters
+    ----------
+    infec_vec:
+        Full infection array of shape
+        ``(num_simulations, gt_max_steps + num_time_steps)``.
+        The first ``gt_max_steps`` columns are pre-filled (warm-up).
+    rt_vec:
+        R(t) array of the same shape as ``infec_vec``.
+    gt_pmf:
+        Generation time PMF of shape ``(num_time_steps, gt_max_steps)``.
+        Axis 1 follows the *reversed-lag* convention: index 0 is the
+        largest lag (oldest), index ``-1`` is lag 1 (most recent step).
+        This ordering aligns directly with the look-back window slices
+        so no further reversal is needed inside the loop.
+    gt_max_steps:
+        Size of the warm-up / look-back window.
+    num_time_steps:
+        Number of steps to advance.
+
+    Returns
+    -------
+    np.ndarray
+        Updated ``infec_vec`` (modified in-place and returned).
+
+    Notes
+    -----
+    This method intentionally avoids pandas objects and Python-level
+    data structures so that a future ``@numba.njit`` decoration requires
+    only minimal changes.
+
+    Renewal equation at simulation step ``i`` (0-based)::
+
+        I(t_i) = Σ_s  R(t_{i-s}) · I(t_{i-s}) · w_i(s)
+
+    where the sum runs over ``s = 1..gt_max_steps`` (the look-back
+    window), and ``w_i`` is the GT PMF row for step ``i``.
+    """
+    for i_sim_step in range(num_time_steps):
+        i_full = gt_max_steps + i_sim_step
+        # Look-back window: columns [i_sim_step, i_full)
+        # Shape of each slice: (num_simulations, gt_max_steps)
+        # gt_pmf[i_sim_step] broadcasts as (gt_max_steps,)
+        infec_vec[:, i_full] = np.sum(
+            rt_vec[:, i_sim_step:i_full]
+            * infec_vec[:, i_sim_step:i_full]
+            * gt_pmf[i_sim_step],
+            axis=1,
+        )
+    return infec_vec

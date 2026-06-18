@@ -62,7 +62,7 @@ def main():
 
     # --- Export
     print(uf_table_df)
-    fpath = Path("data/uf_table.csv")
+    fpath = Path("data/demographic/uf_table.csv")
     fpath.parent.mkdir(parents=True, exist_ok=True)
     uf_table_df.to_csv(fpath, index=False)
     print(f"Data exported to {fpath}")

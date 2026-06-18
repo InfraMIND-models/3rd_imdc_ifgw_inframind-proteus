@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import scipy.stats
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +108,8 @@ def wis_score_vectorized(
     Scores deterministic case beam quantiles (prediction intervals) against
     observed case counts.
 
+    Precondition: All simulations must have the same sets of quantiles in `simulations_df`.
+
     Parameters
     ----------
     simulations_df:
@@ -151,6 +154,12 @@ def wis_score_vectorized(
         q_low = alpha / 2.0
         q_high = 1.0 - alpha / 2.0
 
+        if q_low not in available_q or q_high not in available_q:
+            raise ValueError(
+                f"Quantiles {q_low} and {q_high} must be present in simulations_df "
+                f"for alpha={alpha}"
+            )
+
         pred_low = simulations_df.xs(q_low, level="quantile").values
         pred_high = simulations_df.xs(q_high, level="quantile").values
         # Shape: (num_simulations, num_time_steps)
@@ -173,8 +182,89 @@ def wis_score_vectorized(
     return wis
 
 
+def coverages_vectorized(
+    simulations_df: pd.DataFrame,
+    observations_sr: pd.Series,
+    alphas: np.ndarray | None = None,
+    calculate_coverage_likelihood: bool = True,
+) -> pd.DataFrame:
+    """Compute empirical coverage of case beam quantiles.
+
+    Parameters
+    ----------
+    simulations_df:
+        DataFrame with MultiIndex ``(quantile, i_simulation)`` and columns
+        corresponding to time steps.  Must include the 0.5 (median) quantile.
+    observations_sr:
+        Observed case counts indexed by time step.  Must match ``simulations_df.columns``.
+    alphas:
+        Prediction interval levels to evaluate coverages for.
+        Defaults to  ``[0.05, 0.5]`` for 95% and 50% PIs.
+
+    """
+    assert simulations_df.columns.equals(observations_sr.index), (
+        "Time steps in simulations and observations must match"
+    )
+
+    alphas = alphas or np.array([0.05, 0.5])
+
+    available_q = simulations_df.index.get_level_values("quantile").unique().values
+    available_q.sort()
+
+    # Greater-than and less-than masks
+    sim_le_obs = simulations_df.T.le(observations_sr, axis=0).T
+    sim_ge_obs = simulations_df.T.ge(observations_sr, axis=0).T
+
+    sr_list = list()
+    for alpha in alphas:
+        q_low = alpha / 2.0
+        q_high = 1.0 - alpha / 2.0
+        pi_width = 1.0 - alpha
+
+        if q_low not in available_q or q_high not in available_q:
+            raise ValueError(
+                f"Quantiles {q_low} and {q_high} must be present in simulations_df "
+                f"for alpha={alpha}"
+            )
+
+        low_mask = sim_le_obs.xs(q_low, level="quantile")
+        high_mask = sim_ge_obs.xs(q_high, level="quantile")
+
+        # In this combine operation, quantiles must match
+        sr = (low_mask & high_mask).mean(axis=1)
+        sr.name = f"coverage_{pi_width:0.3f}"
+
+        sr_list.append(sr)
+
+    coverages_df = pd.concat(sr_list, axis=1)
+
+    # ----
+    if calculate_coverage_likelihood:
+        num_obs = simulations_df.shape[1]
+        coverage_ll_sr = pd.Series(
+            0., index=coverages_df.index, name="coverage_loglikelihood"
+        )
+
+        for alpha in alphas:
+            pi_width = 1.0 - alpha
+            coverage_col = f"coverage_{pi_width:0.3f}"
+            # Recover from mean to total number of covered points
+            covered_sr = coverages_df[coverage_col] * num_obs
+
+            # Calculate loglikelihood for this pi_width
+            coverage_ll_sr += scipy.stats.binom.logpmf(
+                k=covered_sr.astype(int),
+                n=num_obs,
+                p=pi_width,
+            )
+
+        coverages_df = pd.concat([coverages_df, coverage_ll_sr], axis=1)
+
+    return coverages_df
+
+
 # ---------------------------------------------------------------------------
-# Fallback scoring: individual trajectory metrics
+# Individual trajectory metrics
 # ---------------------------------------------------------------------------
 
 def rmse_vectorized(
@@ -228,3 +318,42 @@ def smape_vectorized(
     with np.errstate(invalid="ignore"):
         ratio = np.where(denom == 0, 0.0, numerator / denom)
     return np.mean(ratio, axis=1)
+
+
+def nb_loglikelihood_vectorized(
+    simulations_df: pd.DataFrame,
+    observations_sr: pd.Series,
+    overdisp: np.ndarray,
+) -> np.ndarray:
+    """Negative Binomial log-likelihood for individual trajectories.
+
+    Parameters
+    ----------
+    simulations_df:
+        DataFrame of shape ``(num_simulations, num_time_steps)``.)
+    observations_sr:
+        Observed counts indexed by time step.
+    overdisp:
+        Array of shape ``(num_simulations,)`` with the negative binomial
+        overdispersion ("n" parameter) to consider for each simulation.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(num_simulations,)`` with the total log-likelihood of each simulation
+        trajectory under a Negative Binomial model with mean given by the
+        simulation and overdispersion given by `overdisp`.
+    """
+    obs = observations_sr.reindex(simulations_df.columns).values  # (num_time_steps,)
+    pred = simulations_df.values            # (num_simulations, num_time_steps)
+    n = overdisp[:, np.newaxis]             # (num_simulations, 1)
+
+    with np.errstate(invalid="ignore"):
+        ll_array = scipy.stats.nbinom.logpmf(
+            k=obs[np.newaxis, :],
+            n=n,
+            p=n / (pred + n)
+        )
+        # Shape: (num_simulations, num_time_steps)
+
+    return np.sum(ll_array, axis=1)  # Sum over time steps

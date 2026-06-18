@@ -21,6 +21,7 @@ import pytest
 import scipy.stats
 
 from inframind_proteus.outbreak_dynamics.scoring import (
+    nb_loglikelihood_vectorized,
     nbinom_ppf_cf,
     rmse_vectorized,
     smape_vectorized,
@@ -312,3 +313,54 @@ class TestSmapeVectorized:
         result = smape_vectorized(sim, obs)
         assert np.all(result >= 0.0)
         assert np.all(result <= 2.0)
+
+
+# ---------------------------------------------------------------------------
+# nb_loglikelihood_vectorized
+# ---------------------------------------------------------------------------
+
+class TestNbLoglikelihoodVectorized:
+    def test_loglikelihood_matches_scipy_loop(self):
+        """Check vectorized NB log-likelihood against a direct SciPy loop."""
+        # --- Setup: 2 simulations, 3 time steps ---
+        simulations_df = pd.DataFrame(
+            data=[
+                [10.0, 20.0, 30.0],  # Predictions for sim 0
+                [12.0, 22.0, 32.0],  # Predictions for sim 1
+            ],
+            columns=pd.to_datetime(["2024-01-01", "2024-01-08", "2024-01-15"]),
+        )
+        simulations_df.index.name = "i_simulation"
+        simulations_df.columns.name = "t"
+
+        observations_sr = pd.Series(
+            data=[15, 25, 35],
+            index=pd.to_datetime(["2024-01-01", "2024-01-08", "2024-01-15"]),
+        )
+        observations_sr.index.name = "t"
+
+        overdisp = np.array([100.0, 110.0])  # n parameter for each sim
+
+        # --- Action ---
+        result = nb_loglikelihood_vectorized(
+            simulations_df=simulations_df,
+            observations_sr=observations_sr,
+            overdisp=overdisp,
+        )
+
+        # --- Verification ---
+        # Manually calculate expected values using a loop over simulations.
+        expected_ll = []
+        for i_sim in range(2):
+            pred = simulations_df.iloc[i_sim].values
+            obs = observations_sr.values
+            n = overdisp[i_sim]
+            p = n / (pred + n)
+            ll_components = scipy.stats.nbinom.logpmf(k=obs, n=n, p=p)
+            expected_ll.append(np.sum(ll_components))
+
+        expected = np.array(expected_ll)
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (2,)
+        np.testing.assert_allclose(result, expected, rtol=1e-6)
