@@ -330,6 +330,78 @@ def _stage_3_plots_and_diagnostics(
     out_dir.mkdir(exist_ok=True, parents=True)
     fig.savefig(out_dir / "stage3_prior-posterior_histograms.pdf")
 
+    # Predictiion intervals from re-sampled trajectories
+    # ===================
+    # OBS: This code below is directly adapted from its prototype.
+    # The entire re-sampling will be done later by dedicated methods.
+    # The code can be shortened and improved!
+    rng = np.random.default_rng(seed=42)
+
+    # --- Re-sample from the posterior to choose trajectories to sample from
+    num_trajectories = 1000
+    re_sample_params: pd.DataFrame = post_samples_df.sample(
+        n=num_trajectories,
+        replace=True,
+        weights=post_samples_df["posterior_weight"],
+        random_state=rng,
+    )
+
+    re_sample_mean_cases = sim_results.mean_cases_df.reindex(re_sample_params.index)
+
+    # After identifying original simulations, reset the indexes to sequential
+    for obj in [re_sample_params, re_sample_mean_cases]:
+        obj.reset_index(drop=True, inplace=True)
+        obj.index.name = "i_sample"
+
+    # --- Reshape to 2D arrays and sample everything at once
+    # Standard shape: (i_sample, i_time)
+    _expectancy = re_sample_mean_cases.values
+    _overdisp = re_sample_params["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
+    p = _overdisp / (_overdisp + _expectancy)
+
+    cases_vec: np.ndarray = rng.negative_binomial(
+        n=_overdisp, p=p, size=_expectancy.shape
+    )
+    cases_df = pd.DataFrame(
+        cases_vec,
+        index=re_sample_params.index,
+        columns=re_sample_mean_cases.columns
+    )
+
+    cases_df
+
+    # --- Visualize sampled trajectories
+    fig, ax = plt.subplots()
+
+    with plt.rc_context(
+            {
+                "patch.linewidth": 0,
+            }
+    ):
+        # === Model trajectories
+        ax.fill_between(
+            cases_df.columns,
+            cases_df.quantile(0.025), cases_df.quantile(0.975),
+            color="palevioletred", alpha=0.5, label="95% CI"
+        )
+        ax.fill_between(
+            cases_df.columns,
+            cases_df.quantile(0.25), cases_df.quantile(0.75),
+            color="palevioletred", alpha=0.5, label="50% CI"
+        )
+
+        ax.plot(cases_df.median(), label="Median", color="palevioletred")
+
+        # === Observations
+        sr = observations_sr[cases_df.columns]
+        ax.plot(sr, label="Observations", color="black", marker="o", linestyle="")
+
+        ax.set_ylabel("Weekly cases")
+        ax.set_title(f"Stage 3 - Sampled trajectories for {location_id} {year}")
+        ax.legend()
+
+        fig.savefig(out_dir / "stage3_pred-interval_from-resample.pdf")
+
 
 def _export_stage3_data(
         location_id, year,
