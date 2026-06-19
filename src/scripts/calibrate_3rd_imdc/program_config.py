@@ -9,7 +9,7 @@ class Stage1Config(BaseConfig):
     """Stage 1 configuration: Broad exploration most free
     parameters."""
 
-    num_simulations: int = 2 ** 12
+    num_simulations: int = 2 ** 19
 
     # Number of data points in the pre-simulation period
     # This is used to determine the prior for the notif_relative_scale parameter
@@ -23,7 +23,7 @@ class Stage2Config(BaseConfig):
     Nuisance parameters are fixed to optimal values
     provided by stage 1.
     """
-    num_simulations: int = 2 ** 12
+    num_simulations: int = 2 ** 19
 
     free_params: list[str] =[
         "rt_logist_r_high",
@@ -31,11 +31,11 @@ class Stage2Config(BaseConfig):
         # "notif_nb_overdispersion",
         # "notif_relative_scale",
     ]
-    ll_temperature: float = 1.  # Higher values flatten the likelihood distribution
-    rel_weight_cutoff: float = 1e-3  # Cutoff relative to maximum weight
 
     # Posterior building
-    sampling_seed: int = 42  # Seed for any sampling procedure in stage 2 (e.g. KDE sampling)
+    posterior_seed: int = 42  # Seed for any posterior-sampling procedure
+    ll_temperature: float = 1.  # Higher values flatten the likelihood distribution
+    rel_weight_cutoff: float = 1e-3  # Cutoff relative to maximum weight
     min_samples_to_kde: int = 1000  # Minimum number of samples to keep after cutoff (overrides cutoff if not met)
     max_samples_to_kde: int = 5000  # Maximum number of samples to keep, avoids heavy KDE calculation
 
@@ -44,8 +44,14 @@ class Stage3Config(BaseConfig):
     """Stage 3 configuration: Adjustment of confidence
     intervals to match coverages.
     """
-    stage3_num_simulations: int = 2 ** 12
+    num_simulations: int = 2 ** 15
 
+    sampling_seed: int = 321
+    posterior_seed: int = 45  # Seed for any sampling procedure in stage 3 (e.g. KDE sampling)
+    ll_temperature: float = 1.  # Higher values flatten the likelihood distribution
+    rel_weight_cutoff: float = 1e-3  # Cutoff relative to maximum weight
+    min_samples_to_kde: int = 1000  # Minimum number of samples to keep after cutoff (overrides cutoff if not met)
+    max_samples_to_kde: int = 5000  # Maximum number of samples to keep, avoids heavy KDE calculation
 
 
 class ProgramConfig(BaseConfig):

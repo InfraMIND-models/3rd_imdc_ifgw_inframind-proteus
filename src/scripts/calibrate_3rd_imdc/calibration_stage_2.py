@@ -19,6 +19,7 @@ from .calibration_stage_1 import Stage1Outputs
 class Stage2Outputs:
     param_samples: pd.DataFrame
     posterior_kde: gaussian_kde
+    kde_param_names: list[str]
 
 
 def run_calibration_stage_2(
@@ -30,8 +31,7 @@ def run_calibration_stage_2(
         stage1_outputs: Stage1Outputs,
 ):
     """"""
-    print(f"\trun_calibration_stage_1({location_id}, {year})")
-    stage1_cfg = cfg.stage1
+    print(f"\trun_calibration_stage_2({location_id}, {year})")
 
     # Preamble
     # =====================
@@ -43,7 +43,7 @@ def run_calibration_stage_2(
         location_id,
         year,
         uf_table_df,
-        num_simulations=stage1_cfg.num_simulations,
+        num_simulations=cfg.stage2.num_simulations,
         scoring_metrics=[
             "nb_loglikelihood",
         ]
@@ -119,7 +119,8 @@ def run_calibration_stage_2(
 
     return Stage2Outputs(
         param_samples=post_samples_df,
-        posterior_kde=post_kde
+        posterior_kde=post_kde,
+        kde_param_names=cfg.stage2.free_params,
     )
 
 
@@ -134,7 +135,7 @@ def _postprocess_stage_2_simulations(
 ) -> tuple[pd.DataFrame, gaussian_kde]:
 
     # --- Build posterior distributions
-    rng = np.random.default_rng(cfg.stage2.sampling_seed)
+    rng = np.random.default_rng(cfg.stage2.posterior_seed)
     # Treat the likelihood function
     df = pd.concat([params_df, sim_results.scoring.summary], axis=1)
     tempered_ll = df["nb_loglikelihood"] / cfg.stage2.ll_temperature
@@ -155,7 +156,7 @@ def _postprocess_stage_2_simulations(
     min_samples = cfg.stage2.min_samples_to_kde
     max_samples = cfg.stage2.max_samples_to_kde
     if num_relevant_weights < min_samples:
-        # Keep min number
+        # Keep min number or as many as available on the original sample size
         df = (
             df
             .sort_values("posterior_weight")
@@ -168,7 +169,7 @@ def _postprocess_stage_2_simulations(
             .sort_values("posterior_weight")
         )
     else:  # num_relevant_weights >= max_samples
-        # Sample again from relevant weights to keep max number
+        # Re-sample from weights above threshold to keep max number
         df = (
             df[df["posterior_weight"] >= w_cutoff]
             .sample(
@@ -180,16 +181,13 @@ def _postprocess_stage_2_simulations(
         )
     # At this point, df contains selected samples and their weights, with a
     #    variable size between specified min and max.
-    param_samples = df
+    post_samples_df = df
 
     # from scipy.stats import gaussian_kde
-    kde = gaussian_kde(
-        param_samples[cfg.stage2.free_params].T.values,
-        weights=param_samples["posterior_weight"]
+    post_kde = gaussian_kde(
+        post_samples_df[cfg.stage2.free_params].T.values,
+        weights=post_samples_df["posterior_weight"]
     )
-
-    post_samples_df = df
-    post_kde = kde
 
     return post_samples_df, post_kde
 

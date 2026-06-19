@@ -22,7 +22,7 @@ def run_calibration_stage_1(
         base_sim_config_dict: dict,
         observations_sr: pd.Series,
         uf_table_df: pd.DataFrame,
-):
+) -> Stage1Outputs:
     """"""
     print(f"\trun_calibration_stage_1({location_id}, {year})")
     stage1_cfg = cfg.stage1
