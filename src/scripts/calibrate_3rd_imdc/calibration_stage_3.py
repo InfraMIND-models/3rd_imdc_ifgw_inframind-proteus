@@ -329,6 +329,7 @@ def _stage_3_plots_and_diagnostics(
 
     out_dir.mkdir(exist_ok=True, parents=True)
     fig.savefig(out_dir / "stage3_prior-posterior_histograms.pdf")
+    plt.close(fig)
 
     # Predictiion intervals from re-sampled trajectories
     # ===================
@@ -401,6 +402,7 @@ def _stage_3_plots_and_diagnostics(
         ax.legend()
 
         fig.savefig(out_dir / "stage3_pred-interval_from-resample.pdf")
+        plt.close(fig)
 
 
 def _export_stage3_data(
