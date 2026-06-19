@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, Field, field
+from email.policy import default
 from pathlib import Path
 
 from inframind_proteus import BaseConfig
 
 
+# @dataclass
 class Stage1Config(BaseConfig):
     """Stage 1 configuration: Broad exploration most free
     parameters."""
@@ -16,6 +19,7 @@ class Stage1Config(BaseConfig):
     presim_period_num_points: int = 6
 
 
+# @dataclass
 class Stage2Config(BaseConfig):
     """Stage 2 configuration: Focused exploration of a subset of
     free parameters.
@@ -25,12 +29,13 @@ class Stage2Config(BaseConfig):
     """
     num_simulations: int = 2 ** 19
 
-    free_params: list[str] =[
+    # free_params: Field[list[str]] = field(default_factory=lambda: [
+    free_params: Field[list[str]] = [
         "rt_logist_r_high",
         "rt_logist_start",
         # "notif_nb_overdispersion",
         # "notif_relative_scale",
-    ]
+    ]#)
 
     # Posterior building
     posterior_seed: int = 42  # Seed for any posterior-sampling procedure
@@ -40,6 +45,7 @@ class Stage2Config(BaseConfig):
     max_samples_to_kde: int = 5000  # Maximum number of samples to keep, avoids heavy KDE calculation
 
 
+# @dataclass
 class Stage3Config(BaseConfig):
     """Stage 3 configuration: Adjustment of confidence
     intervals to match coverages.
@@ -54,6 +60,7 @@ class Stage3Config(BaseConfig):
     max_samples_to_kde: int = 5000  # Maximum number of samples to keep, avoids heavy KDE calculation
 
 
+# @dataclass
 class ProgramConfig(BaseConfig):
     """Internal configuration data class for the calibration procedure script."""
     config_fpath: Path = Path("configs/calibrate_3rd_imdc_default.yaml")

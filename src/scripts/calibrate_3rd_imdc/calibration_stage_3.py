@@ -10,6 +10,7 @@ from scipy.stats import gaussian_kde
 
 from inframind_proteus.outbreak_dynamics import RenewalSimulator, SimulationConfig, SimulationOutput
 from inframind_proteus.outbreak_dynamics.sampling import GammaPrior
+from inframind_proteus.outbreak_dynamics.utils import make_yaml_exportable_dict, save_yaml_dict
 from .calibration_stage_1 import Stage1Outputs
 from .calibration_stage_2 import Stage2Outputs
 from .helpers import _set_config_dict_common
@@ -127,57 +128,36 @@ def run_calibration_stage_3(
         )
     )
 
-    # Plots and diagnostics
-    # ---------------------
+    # Directory for exporting selected outputs
     out_dir = cfg.output_dir / cfg.location_year_subdir_fmt.format(
         location_id=location_id, year=year
     )
     out_dir.mkdir(exist_ok=True, parents=True)
 
-    param_names = sampled_params_df.columns
-    fig, axes = plt.subplots(
-        nrows=len(param_names),
-        ncols=1,
-        figsize=(8, 3 * len(param_names))
+    # Plots and diagnostics
+    # ---------------------
+    _stage_3_plots_and_diagnostics(
+        location_id, year,
+        out_dir=out_dir,
+        cfg=cfg,
+        observations_sr=observations_sr,
+        params_df=params_df,
+        sampled_param_names = sampled_params_df.columns.tolist(),
+        post_kde=post_kde,
+        post_samples_df=post_samples_df,
+        sim_cfg=sim_cfg,
+        sim_results=sim_results,
+        simulator=simulator,
     )
-    df = post_samples_df
 
-    for ax, param_name in zip(axes, param_names):
-
-        weighted = ax.hist(
-            x=df[param_name],
-            weights=df["posterior_weight"],
-            alpha=0.5, label="weighted",
-            density=True,
-        )
-
-        unweighted = ax.hist(
-            x=df[param_name],
-            alpha=0.5, label="unweighted",
-            density=True,
-        )
-
-        ax.set_xlabel(param_name)
-        ax.set_ylabel("Density")
-
-
-    fig.suptitle(f"Stage 3 - Prior vs Posterior for {location_id} {year}")
-    fig.tight_layout()
-    axes[0].legend()
-    # fig.show()
-
-    fig.savefig(out_dir / "stage3_prior-posterior_histograms.pdf")
-
-    # _stage_3_plots_and_diagnostics(
-    #     location_id, year,
-    #     cfg,
-    #     observations_sr,
-    #     params_df,
-    #     post_kde,
-    #     post_samples_df,
-    #     sim_cfg,
-    #     sim_results
-    # )
+    _export_stage3_data(
+        location_id, year,
+        out_dir=out_dir,
+        cfg=cfg,
+        post_samples_df=post_samples_df,
+        sim_results=sim_results,
+        simulator=simulator,
+    )
 
     return Stage3Outputs(
         param_samples=post_samples_df,
@@ -291,3 +271,76 @@ def _postprocess_stage_3_simulations(
 
     return post_samples_df, post_kde
 
+
+def _stage_3_plots_and_diagnostics(
+        location_id, year,
+        out_dir: Path,
+        cfg: ProgramConfig,
+        observations_sr: pd.Series,
+        params_df: pd.DataFrame,
+        sampled_param_names: list[str],
+        post_kde: gaussian_kde,
+        post_samples_df: pd.DataFrame,
+        sim_cfg: SimulationConfig,
+        sim_results: SimulationOutput,
+        simulator: RenewalSimulator
+):
+    """"""
+
+    # Prior and posterior distributions as histograms
+    # =====================
+    param_names = sampled_param_names
+
+    fig, axes = plt.subplots(
+        nrows=len(param_names),
+        ncols=1,
+        figsize=(8, 3 * len(param_names))
+    )
+    df = post_samples_df
+
+    for ax, param_name in zip(axes, param_names):
+        weighted = ax.hist(
+            x=df[param_name],
+            weights=df["posterior_weight"],
+            alpha=0.5, label="weighted",
+            density=True,
+        )
+
+        unweighted = ax.hist(
+            x=df[param_name],
+            alpha=0.5, label="unweighted",
+            density=True,
+        )
+
+        ax.set_xlabel(param_name)
+        ax.set_ylabel("Density")
+
+    fig.suptitle(f"Stage 3 - Prior vs Posterior for {location_id} {year}")
+    fig.tight_layout()
+    axes[0].legend()
+    # fig.show()
+
+    out_dir.mkdir(exist_ok=True, parents=True)
+    fig.savefig(out_dir / "stage3_prior-posterior_histograms.pdf")
+
+
+def _export_stage3_data(
+        location_id, year,
+        out_dir: Path,
+        cfg: ProgramConfig,
+        post_samples_df: pd.DataFrame,
+        # post_kde: gaussian_kde,
+        sim_results: SimulationOutput,
+        simulator: RenewalSimulator,
+):
+    """"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- Export simulation config (realized, not informed)
+    d = make_yaml_exportable_dict(
+        sim_results.config.to_dict()
+    )
+    save_yaml_dict(d, out_dir / "stage3_config.yaml", safe=False)
+
+
+    print(d)

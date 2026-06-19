@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Union
 
 
@@ -12,6 +12,11 @@ class BaseConfig:
     Similar to a pydantic BaseModel, but for this project we want to
     keep it simple and use our own.
     """
+    #
+    # def __init_subclass__(cls, **kwargs):
+    #     """Automatically applies the dataclass decorator to all subclasses."""
+    #     super().__init_subclass__(**kwargs)
+    #     dataclass(cls)
 
     def update_from_dict(self, config_dict: Union[dict[str, Any], None]) -> None:
         """Update the configuration from a dictionary.
@@ -49,3 +54,41 @@ class BaseConfig:
         if preprocess:
             cfg.preprocess()
         return cfg
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the config object to a dictionary, recursing through
+        nested config members.
+
+        Data is shallow-copied, so mutable objects (e.g. lists) will be the
+        same as the one held by this object.
+
+        This function does not apply any special YAML-friendly serialization,
+        but you can call `make_yaml_exportable_dict()` after this before
+        exporting to YAML.
+        """
+
+        # Select non-callable and non-private class attributes
+        d = {
+            key: value for key, value in self.__class__.__dict__.items()
+            if not key.startswith("__") and not callable(value)
+        }
+        # Update with instance attributes, which may override class attributes
+        d.update(self.__dict__)
+
+        # Recurse into nested BaseConfig objects
+        for field_name, field_value in d.items():
+            if isinstance(field_value, BaseConfig) or hasattr(field_value, "to_dict"):
+                d[field_name] = field_value.to_dict()
+
+        return d
+
+        # # Alternative approach: Works if all subclasses are dataclasses.
+        # result = {}
+        # for f in fields(self):
+        #     value = getattr(self, f.name)
+        #     if isinstance(value, BaseConfig):
+        #         result[f.name] = value.to_dict()
+        #     else:
+        #         result[f.name] = value
+        #
+        # return result

@@ -8,10 +8,13 @@ Includes:
 from __future__ import annotations
 
 import io
+from collections import OrderedDict, defaultdict
+from copy import deepcopy
 from pathlib import Path
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 from epiweeks import Week as EpiWeek
 import pandas as pd
 from pathos.multiprocessing import ProcessPool
@@ -91,16 +94,74 @@ def parse_timestamp(
     )
 
 
-def load_yaml_dict(path: str | Path) -> dict[Any, Any]:
+def load_yaml_dict(path: str | Path, safe=True) -> dict[Any, Any]:
     """Load a YAML file and return its contents as a dict."""
+    loader = yaml.SafeLoader if safe else yaml.Loader
     with open(path) as fp:
-        return yaml.safe_load(fp) or {}
+        return yaml.load(fp, Loader=loader) or {}
 
 
-def save_yaml_dict(data: dict[str, Any], path: str | Path) -> None:
+def save_yaml_dict(data: dict[str, Any], path: str | Path, safe=True) -> None:
     """Save a dict to a YAML file."""
+    dumper = yaml.SafeDumper if safe else yaml.Dumper
     with open(path, "w") as fp:
-        yaml.safe_dump(data, fp)
+        yaml.dump(data, fp, Dumper=dumper)
+
+
+def make_yaml_exportable_dict(
+        data: dict,
+        skip_keys: list = None,
+        copy=True,
+):
+    """Converts some data types within a dictionary into other objects
+    that can be read in a file (e.g. strings).
+    Operates recursively through contained dictionaries.
+    Changes are made inplace for all dictionaries.
+
+    Parameters
+    ----------
+    data : dict
+        The input dictionary to be converted.
+    skip_keys : list, optional
+        List of keys to skip during conversion. If a key is in this list, its
+        value will not be converted, even if it is of a type that would normally
+        be converted. Default is None, which means no keys are skipped.
+    copy : bool, optional
+        If True (default), the function will operate on a deep copy
+        of the input dictionary. If False, the function returns the same
+        dictionary, which is modified in place.
+    """
+    skip_keys = skip_keys or list()
+
+    d = deepcopy(data) if copy else data
+
+    for key, val in d.items():
+
+        # Ordered and default dict
+        if isinstance(val, (OrderedDict, defaultdict)):
+            d[key] = dict(val)
+
+        # pathlib.Path into its string
+        if isinstance(val, Path):
+            d[key] = str(val.expanduser())
+
+        # Timestamps into string repr.
+        if isinstance(val, pd.Timestamp):
+            d[key] = str(val)
+
+        # Specified iterables
+        if isinstance(
+                val, (tuple, np.ndarray)
+        ):
+            d[key] = list(val)
+
+        # Recurse through inner dictionary
+        if isinstance(val, dict):
+            d[key] = make_yaml_exportable_dict(
+                val, skip_keys=skip_keys, copy=False
+            )
+
+    return d
 
 
 def parse_set_arguments_with_yaml(set_args: list[list[str]]):
