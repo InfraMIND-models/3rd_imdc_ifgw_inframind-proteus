@@ -142,7 +142,7 @@ def run_calibration_stage_3(
         cfg=cfg,
         observations_sr=observations_sr,
         params_df=params_df,
-        sampled_param_names = sampled_params_df.columns.tolist(),
+        sampled_param_names=sampled_params_df.columns.tolist(),
         post_kde=post_kde,
         post_samples_df=post_samples_df,
         sim_cfg=sim_cfg,
@@ -155,6 +155,7 @@ def run_calibration_stage_3(
         out_dir=out_dir,
         cfg=cfg,
         post_samples_df=post_samples_df,
+        sampled_param_names=sampled_params_df.columns.tolist(),
         sim_results=sim_results,
         simulator=simulator,
     )
@@ -329,6 +330,7 @@ def _export_stage3_data(
         out_dir: Path,
         cfg: ProgramConfig,
         post_samples_df: pd.DataFrame,
+        sampled_param_names: list[str],
         # post_kde: gaussian_kde,
         sim_results: SimulationOutput,
         simulator: RenewalSimulator,
@@ -336,11 +338,34 @@ def _export_stage3_data(
     """"""
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- Export simulation config (realized, not informed)
+    # --- Export simulation config (serialized from config object, not informed)
     d = make_yaml_exportable_dict(
         sim_results.config.to_dict()
     )
-    save_yaml_dict(d, out_dir / "stage3_config.yaml", safe=False)
+    save_yaml_dict(d, out_dir / "stage3_sim_config.yaml", safe=False)
 
+    # --- Export posterior samples - Free parameters only
+    cols = [
+        *sampled_param_names,
+        "posterior_weight",
+    ]
+    df = post_samples_df[cols]
+    df.to_csv(
+        out_dir / "stage3_posterior_samples.csv.gz",
+        compression={
+            "method": "gzip",
+            "compresslevel": 9,
+        },
+    )
 
-    print(d)
+    # --- Export mean trajectories of remaining samples
+    df = sim_results.mean_cases_df
+    df = df.reindex(post_samples_df.index)
+
+    df.to_csv(
+        out_dir / "stage3_mean_cases.csv.gz",
+        compression={
+            "method": "gzip",
+            "compresslevel": 9,
+        },
+    )

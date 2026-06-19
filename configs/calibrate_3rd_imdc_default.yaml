@@ -3,16 +3,17 @@
 #base_sim_config_fpath: "configs/simulation_config_default.yaml"
 
 use_location_ids: ["SP", "SE", "MG", "PA"]
+# use_location_ids: []
 
-#ncpus: 4
+ncpus: 2
 
 # --- Low numbers for debugging
 stage1:
-    num_simulations: 4096  # 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
+    num_simulations: 1048576  # 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
 
 stage2:
-    num_simulations: 4096
+    num_simulations: 1048576
 
 stage3:
-    num_simulations: 4096
+    num_simulations: 262144
 
