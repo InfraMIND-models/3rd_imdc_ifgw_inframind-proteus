@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Union
 
 
 @dataclass
@@ -13,13 +13,14 @@ class BaseConfig:
     keep it simple and use our own.
     """
 
-    def update_from_dict(self, config_dict: dict[str, Any]) -> None:
+    def update_from_dict(self, config_dict: Union[dict[str, Any], None]) -> None:
         """Update the configuration from a dictionary.
         New fields are added, regardless of whether they exist in the current
         config or not.
         If a field matches another config object, the update is applied
         recursively to that config object.
         """
+        config_dict = config_dict or {}
         for field_name, field_value in config_dict.items():
             is_cfg = False
             if hasattr(self, field_name):
