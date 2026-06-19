@@ -23,6 +23,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import NoneType
 from typing import Literal, Any
 
 import numba as nb
@@ -270,8 +271,8 @@ class SimulationOutput:
     infec_df:
         Abstract infection counts.
         Index = ``i_simulation``, columns = time step values in days.
-    cases_df:
-        Sampled reported case counts (observation model draws).
+    mean_cases_df:
+        Expectancy of reported case counts.
         Same shape as ``infec_df``.
     case_beam_df:
         Deterministic quantile case beam.
@@ -282,11 +283,11 @@ class SimulationOutput:
         The :class:`SimulationConfig` used to produce these outputs.
     """
     infec_df: pd.DataFrame
-    cases_df: pd.DataFrame
+    mean_cases_df: pd.DataFrame
     case_beam_df: pd.DataFrame
     scoring: SimulationScoring | None
     config: SimulationConfig
-    rt_df: pd.Dataframe | None = None
+    rt_df: pd.DataFrame | None = None
 
     @classmethod
     def concat(
@@ -309,7 +310,7 @@ class SimulationOutput:
         """
         return cls(
             infec_df=pd.concat([o.infec_df for o in objs], axis=0),
-            cases_df=pd.concat([o.cases_df for o in objs], axis=0),
+            mean_cases_df=pd.concat([o.mean_cases_df for o in objs], axis=0),
             case_beam_df=pd.concat([o.case_beam_df for o in objs], axis=0),
             scoring=SimulationScoring.concat(
                 [o.scoring for o in objs if o.scoring is not None]
@@ -530,7 +531,7 @@ class RenewalSimulator:
         rng = np.random.default_rng(cfg.rng_seed)
         infec_sim = infec_vec[:, gt_steps:]  # (num_sim, num_steps)
 
-        cases_vec, case_beam_df = self._apply_observation_model(
+        mean_cases_vec, case_beam_df = self._apply_observation_model(
         # case_beam_df = self._apply_observation_model(
             infec_sim, _params, rng,
             population_size=cfg.location.population_size,
@@ -551,10 +552,10 @@ class RenewalSimulator:
         infec_df.index = _params.index
         infec_df.columns.name = "t"
 
-        cases_df = pd.DataFrame(cases_vec, columns=sim_timestamps)
-        # cases_df.index.name = "i_simulation"
-        cases_df.index = _params.index
-        cases_df.columns.name = "t"
+        mean_cases_df = pd.DataFrame(mean_cases_vec, columns=sim_timestamps)
+        # mean_cases_df.index.name = "i_simulation"
+        mean_cases_df.index = _params.index
+        mean_cases_df.columns.name = "t"
 
         case_beam_df.columns = sim_timestamps
         case_beam_df.columns.name = "t"
@@ -593,7 +594,7 @@ class RenewalSimulator:
 
         return SimulationOutput(
             infec_df=infec_df,
-            cases_df=cases_df,
+            mean_cases_df=mean_cases_df,
             case_beam_df=case_beam_df,
             scoring=scoring,
             config=cfg,
@@ -759,8 +760,9 @@ class RenewalSimulator:
 
         Returns
         -------
-        cases_vec : np.ndarray
-            Sampled case counts.  Shape ``(num_simulations, num_time_steps)``.
+        mean_cases_vec : np.ndarray
+            Expectancy of the number of cases.
+            Shape ``(num_simulations, num_time_steps)``.
             dtype int64.
         case_beam_df : pd.DataFrame
             Deterministic case beam.
@@ -791,14 +793,20 @@ class RenewalSimulator:
             scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
 
         # Expected reported cases; clip to avoid negative expectancies
-        expectancy = np.clip(infec_vec * scale_f, 0.0, None)
+        expectancy: np.ndarray = np.clip(infec_vec * scale_f, 0.0, None)
+
+        if np.isnan(expectancy).any():
+            expectancy[np.isnan(expectancy)] = 0.
+            print("WARNING: NaN values found in expectancy; replaced with 0.")
 
         # NB success probability: p = n / (n + μ)
         # When expectancy = 0 → p = 1 → NB always draws 0 (correct)
         p = overdisp / (overdisp + expectancy)
 
-        # Stochastic sample (integer counts)
-        cases_vec = rng.negative_binomial(n=overdisp, p=p)
+        # # Stochastic sample (integer counts) (DISABLED)
+        # cases_vec = rng.negative_binomial(n=overdisp, p=p)
+        # Store the mean for future trajectory sampling
+        mean_cases_vec = expectancy
 
         # Deterministic quantile beam via Cornish-Fisher approximation
         beam_frames = [
@@ -815,8 +823,11 @@ class RenewalSimulator:
             names=["quantile", "i_simulation"],
         )
 
-        return cases_vec, case_beam_df
-        # return case_beam_df
+        # Mean cases, allowing to sample trajectories outside this function
+        mean_cases_vec = expectancy
+
+        # return cases_vec, case_beam_df
+        return mean_cases_vec, case_beam_df
 
     @staticmethod
     def score_simulations(

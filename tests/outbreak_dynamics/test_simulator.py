@@ -296,17 +296,17 @@ class TestObservationModel:
     def params(self, sim):
         return make_params_df(sim.config.num_simulations)
 
-    def test_cases_vec_shape(self, sim, params):
+    def test_mean_cases_vec_shape(self, sim, params):
         infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
         rng = np.random.default_rng(0)
-        cases_vec, _ = sim._apply_observation_model(infec, params, rng)
-        assert cases_vec.shape == (sim.config.num_simulations, sim.config.num_time_steps)
+        mean_cases_vec, _ = sim._apply_observation_model(infec, params, rng)
+        assert mean_cases_vec.shape == (sim.config.num_simulations, sim.config.num_time_steps)
 
-    def test_cases_vec_dtype_integer(self, sim, params):
+    def test_mean_cases_vec_dtype_float(self, sim, params):
         infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
         rng = np.random.default_rng(0)
-        cases_vec, _ = sim._apply_observation_model(infec, params, rng)
-        assert np.issubdtype(cases_vec.dtype, np.integer)
+        mean_cases_vec, _ = sim._apply_observation_model(infec, params, rng)
+        assert np.issubdtype(mean_cases_vec.dtype, np.floating)
 
     def test_case_beam_multiindex_levels(self, sim, params):
         infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
@@ -327,8 +327,8 @@ class TestObservationModel:
         """With zero infections, expected cases = 0 → NB always draws 0."""
         infec = np.zeros((sim.config.num_simulations, sim.config.num_time_steps))
         rng = np.random.default_rng(0)
-        cases_vec, case_beam_df = sim._apply_observation_model(infec, params, rng)
-        assert_allclose(cases_vec, 0)
+        mean_cases_vec, case_beam_df = sim._apply_observation_model(infec, params, rng)
+        assert_allclose(mean_cases_vec, 0)
 
     def test_case_beam_lower_le_upper(self, sim, params):
         """Sorted quantiles must produce non-decreasing beam values."""
@@ -343,14 +343,15 @@ class TestObservationModel:
         beam_high = case_beam_df.xs(q_sorted[-1], level="quantile").values
         assert np.all(beam_low <= beam_high)
 
-    def test_determinism_with_same_seed(self, sim, params):
-        """Same RNG seed → identical cases_vec."""
-        infec = np.full(
-            (sim.config.num_simulations, sim.config.num_time_steps), 10.0
-        )
-        c1, _ = sim._apply_observation_model(infec, params, np.random.default_rng(7))
-        c2, _ = sim._apply_observation_model(infec, params, np.random.default_rng(7))
-        np.testing.assert_array_equal(c1, c2)
+    # # Deprecated: Now only the mean cases are exported, which are deterministic.
+    # def test_determinism_with_same_seed(self, sim, params):
+    #     """Same RNG seed → identical mean_cases_vec."""
+    #     infec = np.full(
+    #         (sim.config.num_simulations, sim.config.num_time_steps), 10.0
+    #     )
+    #     c1, _ = sim._apply_observation_model(infec, params, np.random.default_rng(7))
+    #     c2, _ = sim._apply_observation_model(infec, params, np.random.default_rng(7))
+    #     np.testing.assert_array_equal(c1, c2)
 
     def test_missing_required_params_raises(self, sim, params):
         infec = np.ones((sim.config.num_simulations, sim.config.num_time_steps))
@@ -442,7 +443,7 @@ class TestObservationModel:
         infec = np.full((sim.config.num_simulations, sim.config.num_time_steps), 100.0)
         params["notif_relative_scale"] = 1.0
 
-        cases_vec, _ = sim._apply_observation_model(
+        mean_cases_vec, _ = sim._apply_observation_model(
             infec,
             params,
             np.random.default_rng(0),
@@ -450,7 +451,7 @@ class TestObservationModel:
             reference_population_size=int(1e5),
         )
 
-        assert_allclose(cases_vec, 0)
+        assert_allclose(mean_cases_vec, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +504,7 @@ class TestRun:
     def test_cases_df_shape(self, sim, params, initial_infec):
         out = sim.run(params, initial_infec)
         n, s = sim.config.num_simulations, sim.config.num_time_steps
-        assert out.cases_df.shape == (n, s)
+        assert out.mean_cases_df.shape == (n, s)
 
     def test_case_beam_df_multiindex(self, sim, params, initial_infec):
         out = sim.run(params, initial_infec)
@@ -514,7 +515,7 @@ class TestRun:
     def test_output_columns_are_timestamps(self, sim, params, initial_infec):
         out = sim.run(params, initial_infec)
         assert isinstance(out.infec_df.columns, pd.DatetimeIndex)
-        assert isinstance(out.cases_df.columns, pd.DatetimeIndex)
+        assert isinstance(out.mean_cases_df.columns, pd.DatetimeIndex)
 
     def test_first_column_is_sim_start(self, sim, params, initial_infec):
         out = sim.run(params, initial_infec)
