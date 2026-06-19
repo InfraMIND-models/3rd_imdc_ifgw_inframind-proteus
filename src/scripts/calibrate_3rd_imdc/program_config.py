@@ -12,7 +12,7 @@ class Stage1Config(BaseConfig):
     """Stage 1 configuration: Broad exploration most free
     parameters."""
 
-    num_simulations: int = 2 ** 19
+    num_simulations: int = 2 ** 12
 
     # Number of data points in the pre-simulation period
     # This is used to determine the prior for the notif_relative_scale parameter
@@ -27,7 +27,7 @@ class Stage2Config(BaseConfig):
     Nuisance parameters are fixed to optimal values
     provided by stage 1.
     """
-    num_simulations: int = 2 ** 19
+    num_simulations: int = 2 ** 12
 
     # free_params: Field[list[str]] = field(default_factory=lambda: [
     free_params: Field[list[str]] = [
@@ -50,7 +50,7 @@ class Stage3Config(BaseConfig):
     """Stage 3 configuration: Adjustment of confidence
     intervals to match coverages.
     """
-    num_simulations: int = 2 ** 15
+    num_simulations: int = 2 ** 12
 
     sampling_seed: int = 321
     posterior_seed: int = 45  # Seed for any sampling procedure in stage 3 (e.g. KDE sampling)

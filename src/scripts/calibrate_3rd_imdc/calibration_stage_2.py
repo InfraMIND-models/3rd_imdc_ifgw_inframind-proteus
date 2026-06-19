@@ -10,7 +10,7 @@ from scipy.stats import gaussian_kde
 
 from inframind_proteus.outbreak_dynamics import RenewalSimulator, SimulationConfig, SimulationOutput
 from inframind_proteus.outbreak_dynamics.sampling import GammaPrior
-from .helpers import _set_config_dict_common
+from .helpers import _set_config_dict_common, prepare_output_subdirs
 from .program_config import ProgramConfig
 from .calibration_stage_1 import Stage1Outputs
 
@@ -73,6 +73,7 @@ def run_calibration_stage_2(
 
     # --- Adjust outputs and retained data
     # True so we can plot Rt trajectories
+    # False will save memory
     sim_config_dict["output"]["keep_rt_trajectories"] = True
 
     # --- Create simulator object with modified configuration dictionary
@@ -198,10 +199,12 @@ def _stage_2_plots_and_diagnostics(
         cfg, observations_sr, params_df, post_kde, post_samples_df,
         sim_cfg, sim_results
 ):
-    out_dir = cfg.output_dir / cfg.location_year_subdir_fmt.format(
-        location_id=location_id, year=year
+    data_out_dir, plots_out_dir = prepare_output_subdirs(
+        location_id, year,
+        output_dir=cfg.output_dir,
+        location_year_subdir_fmt=cfg.location_year_subdir_fmt,
+        mkdirs=True
     )
-    out_dir.mkdir(exist_ok=True, parents=True)
 
     # --- Visualize median trajectories against data
     df = post_samples_df
@@ -221,7 +224,9 @@ def _stage_2_plots_and_diagnostics(
 
     if rt_df is None:
         print("Warning: Rt trajectories not available for stage 2 plots.")
-        rt_df = pd.DataFrame()  # Empty dataframe to avoid errors in plotting
+        rt_df = sampled_rt_df = pd.DataFrame()  # Empty dataframe to avoid errors in plotting
+    else:
+        sampled_rt_df = rt_df.reindex(sampled_params_df.index)
 
     rc = deepcopy(plt.rcParams)
     with plt.rc_context(rc):
@@ -244,14 +249,15 @@ def _stage_2_plots_and_diagnostics(
         ax.legend()
 
         # --- Reproduction number
+        _df = sampled_rt_df
         ax = axes[1]
-        ax.plot(rt_df.T, color="darkslateblue", alpha=0.2)
-        ax.plot(rt_df.columns, np.ones(rt_df.shape[1]), "k--", label="R=1")
+        ax.plot(_df.T, color="darkslateblue", alpha=0.2)
+        ax.plot(_df.columns, np.ones(_df.shape[1]), "k--", label="R=1")
         ax.set_ylabel("Reproduction number")
         ax.set_xlim(*axes[0].get_xlim())  # Align x-axis with case trajectories
 
         fig.tight_layout()
-        fig.savefig(out_dir / "stage2_median_trajectories.pdf")
+        fig.savefig(plots_out_dir / "stage2_median_trajectories.pdf")
         plt.close(fig)
 
     # --- Visualize posteriors
@@ -292,5 +298,5 @@ def _stage_2_plots_and_diagnostics(
         axes[0].legend()
         fig.tight_layout()
 
-        fig.savefig(out_dir / "stage2_posteriors.pdf")
+        fig.savefig(plots_out_dir / "stage2_posteriors.pdf")
         plt.close(fig)

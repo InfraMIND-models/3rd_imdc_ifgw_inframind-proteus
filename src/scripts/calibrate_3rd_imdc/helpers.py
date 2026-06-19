@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 
 from inframind_proteus.outbreak_dynamics.utils import year_week_to_date
@@ -44,3 +46,30 @@ def _set_config_dict_common(
 
     if scoring_metrics is not None:
         _d["scoring"]["metrics"] = scoring_metrics
+
+
+def prepare_output_subdirs(
+        location_id, year,
+        output_dir: Path,
+        location_year_subdir_fmt: str,
+        mkdirs=True,
+):
+    """Make output subdirectories names for a given location and year and
+    return their paths. Optionally create the directories if they don't
+    exist (default: True).
+    """
+    location_year_subdir = (
+        output_dir
+        / location_year_subdir_fmt.format(
+            location_id=location_id, year=year
+        )
+    )
+
+    data_out_dir = location_year_subdir
+    plots_out_dir = location_year_subdir / "plots"
+
+    if mkdirs:
+        plots_out_dir.mkdir(exist_ok=True, parents=True)
+        data_out_dir.mkdir(exist_ok=True, parents=True)
+
+    return data_out_dir, plots_out_dir

@@ -13,7 +13,7 @@ from inframind_proteus.outbreak_dynamics.sampling import GammaPrior
 from inframind_proteus.outbreak_dynamics.utils import make_yaml_exportable_dict, save_yaml_dict
 from .calibration_stage_1 import Stage1Outputs
 from .calibration_stage_2 import Stage2Outputs
-from .helpers import _set_config_dict_common
+from .helpers import _set_config_dict_common, prepare_output_subdirs
 from .program_config import ProgramConfig
 
 
@@ -138,7 +138,7 @@ def run_calibration_stage_3(
     # ---------------------
     _stage_3_plots_and_diagnostics(
         location_id, year,
-        out_dir=out_dir,
+        # out_dir=out_dir,
         cfg=cfg,
         observations_sr=observations_sr,
         params_df=params_df,
@@ -152,7 +152,7 @@ def run_calibration_stage_3(
 
     _export_stage3_data(
         location_id, year,
-        out_dir=out_dir,
+        # out_dir=out_dir,
         cfg=cfg,
         post_samples_df=post_samples_df,
         sampled_param_names=sampled_params_df.columns.tolist(),
@@ -275,7 +275,7 @@ def _postprocess_stage_3_simulations(
 
 def _stage_3_plots_and_diagnostics(
         location_id, year,
-        out_dir: Path,
+        # out_dir: Path,
         cfg: ProgramConfig,
         observations_sr: pd.Series,
         params_df: pd.DataFrame,
@@ -287,6 +287,12 @@ def _stage_3_plots_and_diagnostics(
         simulator: RenewalSimulator
 ):
     """"""
+    _, out_dir = prepare_output_subdirs(
+        location_id, year,
+        output_dir=cfg.output_dir,
+        location_year_subdir_fmt=cfg.location_year_subdir_fmt,
+        mkdirs=True
+    )
 
     # Prior and posterior distributions as histograms
     # =====================
@@ -327,7 +333,7 @@ def _stage_3_plots_and_diagnostics(
 
 def _export_stage3_data(
         location_id, year,
-        out_dir: Path,
+        # out_dir: Path,
         cfg: ProgramConfig,
         post_samples_df: pd.DataFrame,
         sampled_param_names: list[str],
@@ -336,13 +342,26 @@ def _export_stage3_data(
         simulator: RenewalSimulator,
 ):
     """"""
-    out_dir.mkdir(parents=True, exist_ok=True)
+    data_out_dir, plots_out_dir = prepare_output_subdirs(
+        location_id, year,
+        output_dir=cfg.output_dir,
+        location_year_subdir_fmt=cfg.location_year_subdir_fmt,
+        mkdirs=True
+    )
 
     # --- Export simulation config (serialized from config object, not informed)
     d = make_yaml_exportable_dict(
         sim_results.config.to_dict()
     )
-    save_yaml_dict(d, out_dir / "stage3_sim_config.yaml", safe=False)
+    save_yaml_dict(d, data_out_dir / "stage3_sim_config.yaml", safe=False)
+
+    # # --- Export fixed-value parameters
+    # _cfg = sim_results.config
+    # d = _cfg.sampling.rt_params.copy()
+    # d.update(_cfg.sampling.observation_params)
+    # sr = pd.Series(d, name="value")
+    # sr.index.name = "parameter_name"
+    # sr.to_csv(out_dir / "stage3_fixed_parameters.csv")
 
     # --- Export posterior samples - Free parameters only
     cols = [
@@ -351,7 +370,7 @@ def _export_stage3_data(
     ]
     df = post_samples_df[cols]
     df.to_csv(
-        out_dir / "stage3_posterior_samples.csv.gz",
+        data_out_dir / "stage3_posterior_samples.csv.gz",
         compression={
             "method": "gzip",
             "compresslevel": 9,
@@ -363,7 +382,7 @@ def _export_stage3_data(
     df = df.reindex(post_samples_df.index)
 
     df.to_csv(
-        out_dir / "stage3_mean_cases.csv.gz",
+        data_out_dir / "stage3_mean_cases.csv.gz",
         compression={
             "method": "gzip",
             "compresslevel": 9,

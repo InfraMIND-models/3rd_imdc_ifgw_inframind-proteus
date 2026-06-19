@@ -27,7 +27,7 @@ from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.utils import (
     parse_set_arguments_with_yaml, load_yaml_dict, year_week_to_date,
-    apply_include_exclude_logic, map_parallel_or_sequential
+    apply_include_exclude_logic, map_parallel_or_sequential, make_yaml_exportable_dict, save_yaml_dict
 )
 from scripts.calibrate_3rd_imdc.program_config import ProgramConfig
 from scripts.calibrate_3rd_imdc.calibration_stage_1 import (
@@ -165,6 +165,15 @@ def run_calibration_stages_location_year(
         DiseaseTimeSeriesCache()
         .get_location(location_id)
     )
+
+    # --- Export program configuration
+    d = make_yaml_exportable_dict(cfg.to_dict())
+    out_dir = cfg.output_dir / cfg.location_year_subdir_fmt.format(
+        location_id=location_id,
+        year=year
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    save_yaml_dict(d, out_dir / "calibration_program_config.yaml")
 
     # --- Stage 1
     s1_xt0 = time.time()

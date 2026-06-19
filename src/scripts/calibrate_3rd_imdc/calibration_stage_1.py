@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 
 from inframind_proteus.outbreak_dynamics import RenewalSimulator, SimulationConfig, SimulationOutput
 from inframind_proteus.outbreak_dynamics.sampling import GammaPrior
-from .helpers import _set_config_dict_common
+from .helpers import _set_config_dict_common, prepare_output_subdirs
 from .program_config import ProgramConfig
 
 
@@ -166,11 +166,12 @@ def _stage_1_plots_and_diagnostics(
     """"""
     stage1_cfg = cfg.stage1
     sim_cfg = simulator.config
-
-    out_dir = cfg.output_dir / cfg.location_year_subdir_fmt.format(
-        location_id=location_id, year=year
+    data_out_dir, plots_out_dir = prepare_output_subdirs(
+        location_id, year,
+        output_dir=cfg.output_dir,
+        location_year_subdir_fmt=cfg.location_year_subdir_fmt,
+        mkdirs=True
     )
-    out_dir.mkdir(exist_ok=True, parents=True)
 
     rc = deepcopy(plt.rcParams)
     rc["patch.linewidth"] = 0
@@ -205,14 +206,9 @@ def _stage_1_plots_and_diagnostics(
         ax.set_ylabel("Weekly cases")
         fig.tight_layout()
 
-        fig.savefig(out_dir / "stage1_max_ll_case_beam.pdf")
+        fig.savefig(plots_out_dir / "stage1_max_ll_case_beam.pdf")
         plt.close(fig)
 
     # --- Export some stuff
     # TODO: Move to export helper
-    max_ll_params.to_csv(out_dir / "stage1_max_ll_params.csv")
-
-
-    pass
-
-
+    max_ll_params.to_csv(data_out_dir / "stage1_max_ll_params.csv")
