@@ -75,7 +75,7 @@ class ProgramConfig(BaseConfig):
     zero_date_epiweek: int = 41  # Reference date for t = 0 (not simulation start)
     sim_start_epiweek: int = 26  # Note: Train data for each season ends at epiweek 25.
     calibration_start_epiweek: int = 41
-    calibration_end_epiweek: int = 40  # Of the next year
+    calibration_end_epiweek: int = 25  # Of the next year
 
     # --- Locations and years to run
     # use_location_ids = ["SP", "SE", "MG", "PA"]  # Runs all!
