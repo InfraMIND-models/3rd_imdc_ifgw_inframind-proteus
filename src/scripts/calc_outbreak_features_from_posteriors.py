@@ -14,8 +14,10 @@ from typing import Union, Any, Literal
 
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 
 from inframind_proteus import BaseConfig
+from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.outbreak_features import outbreak_features_from_trajectories, \
     outbreak_feature_stats
@@ -56,12 +58,15 @@ class ProgramConfig(BaseConfig):
     end_in_next_year: bool = True  # Whether the calculation end epiweek is in the next year (e.g. 40 of the next year)
 
     num_stochastic_trajectories = 100
+    observation_model_seed = 42
 
     export_feature_samples: bool = False
     export_feature_stats: bool = True
-    # export_
+    export_validation_plots: bool = True
 
-    # disease_cases_dir: Path = Path("data/disease/dengue_cases_uf_weekly")
+    # --- Validation data (observations) - Optional
+    disease_cases_dir: Path = Path("data/disease/dengue_cases_uf_weekly")
+
 
     def preprocess(self, *args, **kwargs):
         super().preprocess(*args, **kwargs)
@@ -118,6 +123,11 @@ class ProgramData:
     cases_df: pd.DataFrame
     # ^ Stochastic trajectories of disease cases to calculate outbreak features.
     #    Signature: df.loc[(*trajetory_id_vars*), time]
+
+    # Temporal - calculated
+    window_start: pd.Timestamp
+    window_end: pd.Timestamp
+    zero_date: pd.Timestamp
 
     feature_samples_df: pd.DataFrame
     # ^ Outbreak features from each individual trajectory (full data).
@@ -238,14 +248,14 @@ def main(argv: Union[list[str], None] = None) -> None:
     # Define calculation window
     # ===================
     # -()-
-    window_start = year_week_to_date(
+    data.window_start = year_week_to_date(
         cfg.year, cfg.calculation_start_epiweek
     )
-    window_end = year_week_to_date(
+    data.window_end = year_week_to_date(
         cfg.year + cfg.end_in_next_year,
         cfg.calculation_end_epiweek
     )
-    zero_date = pd.Timestamp(data.sim_cfg.temporal.zero_date)
+    data.zero_date = pd.Timestamp(data.sim_cfg.temporal.zero_date)
 
 
     # Construct trajectories and calculate outbreak features
@@ -256,9 +266,9 @@ def main(argv: Union[list[str], None] = None) -> None:
 
     data.feature_samples_df = outbreak_features_from_trajectories(
         cases_df=data.cases_df,
-        zero_date=zero_date,
-        window_start=window_start,
-        window_end=window_end,
+        zero_date=data.zero_date,
+        window_start=data.window_start,
+        window_end=data.window_end,
         feature_names=cfg.outbreak_feature_names,
     )
 
@@ -355,7 +365,7 @@ def _apply_stochastic_observation_model(
 
     # Sample with negative binomial (observation model)
     # ============================
-    rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng(seed=cfg.observation_model_seed)
     cases_vec: np.ndarray = rng.negative_binomial(
         n=_overdisp, p=p, size=_expectancy.shape
     )
@@ -366,6 +376,91 @@ def _apply_stochastic_observation_model(
     )
 
     return cases_df
+
+
+def _make_validation_plots(
+        cfg: ProgramConfig,
+        data: ProgramData,
+):
+    feature_samples_df = data.feature_samples_df
+    augm_param_samples_df = data.augm_param_samples_df
+
+    out_dir = cfg.output_dir / "plots"
+    out_dir.mkdir(exist_ok=True, parents=True)
+
+
+    # --- Load observations data
+    observations_sr = (
+        DiseaseTimeSeriesCache(disease_cases_dir=cfg.disease_cases_dir)
+        .get_location(cfg.location_id)
+    )
+
+    # --- Calculate its outbreak features
+    obs_features = outbreak_features_from_trajectories(
+        pd.DataFrame(observations_sr).T,
+        window_start=data.window_start,
+        window_end=data.window_end,
+        zero_date=data.zero_date,
+        feature_names=cfg.outbreak_feature_names,
+    ).T["value"]
+    #  ^ Signature: obs_features.loc[feature_name]
+
+    # --- Sub-sample weighted trajectories to make histogram
+    sub_feats_df: pd.DataFrame = feature_samples_df.sample(
+        n=5000,
+        weights=augm_param_samples_df["posterior_weight"],
+        replace=True,
+        random_state=50,
+    )
+
+    # Plot ensemble-level distribution of outbreak features and observed values
+    # ===============
+    feature_names = list(feature_samples_df.columns)
+    with plt.rc_context({
+        "figure.dpi": 150,
+    }):
+        fig, axes = plt.subplots(
+            nrows=len(feature_names),
+            figsize=(8, 3 * len(feature_names)),
+        )
+
+        for i_feature, feature_name in enumerate(feature_names):
+            ax = axes[i_feature]
+
+            # Plot the distribution of the feature from the trajectories
+            ax.hist(
+                sub_feats_df[feature_name],
+            # sub_feats_df[feature_name].plot.hist(
+                bins=30,
+                density=True,
+                color="palevioletred",
+                label="Model distribution"
+            )
+
+            # Plot the observed feature value
+            obs_value = obs_features.loc[feature_name]
+            ax.axvline(
+                obs_value,
+                color="k",
+                linestyle="--",
+                label="Observed value"
+            )
+
+            # ax.set_title(f"Distribution of {feature_name} from posterior samples")
+            ax.set_xlabel(feature_name)
+            ax.set_ylabel("Density")
+
+        axes[0].legend()
+        fig.suptitle(
+            f"{cfg.location_id}_{cfg.year} - Outbreak features from simulations"
+        )
+        fig.tight_layout()
+
+        _fpath = out_dir / "outbreak_features_validation.pdf"
+        fig.savefig(_fpath)
+
+        print(f"\tExported plot: {_fpath}")
+        plt.close(fig)
 
 
 def _export_data(
@@ -382,12 +477,12 @@ def _export_data(
                 "compresslevel": 9,
             }
         )
-        print(f"Exported: {_fpath}")
+        print(f"\tExported: {_fpath}")
 
 
     if cfg.export_feature_stats and hasattr(data, "feature_stats_df"):
-        # _fpath = cfg.output_dir / "outbreak_feature_stats.csv.gz"
-        _fpath = cfg.output_dir / "outbreak_feature_stats.csv"
+        _fpath = cfg.output_dir / "outbreak_feature_stats.csv.gz"
+        # _fpath = cfg.output_dir / "outbreak_feature_stats.csv"
         data.feature_stats_df.to_csv(
             _fpath,
             index=True,
@@ -396,7 +491,11 @@ def _export_data(
                 "compresslevel": 9,
             }
         )
-        print(f"Exported: {_fpath}")
+        print(f"\tExported: {_fpath}")
+
+    if cfg.export_validation_plots and hasattr(data, "feature_samples_df"):
+        _make_validation_plots(cfg, data)
+
 
 if __name__ == '__main__':
     main(sys.argv[1:])
