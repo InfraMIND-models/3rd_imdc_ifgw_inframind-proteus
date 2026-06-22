@@ -12,16 +12,20 @@ import sys
 from pathlib import Path
 from typing import Union, Any, Literal
 
+import numpy as np
 import pandas as pd
 
 from inframind_proteus import BaseConfig
 from inframind_proteus.outbreak_dynamics import SimulationConfig
+from inframind_proteus.outbreak_dynamics.outbreak_features import outbreak_features_from_trajectories, \
+    outbreak_feature_stats
 # from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics.utils import load_yaml_dict, parse_set_arguments_with_yaml, year_week_to_date
 
 
 class ProgramConfig(BaseConfig):
     """"""
+    run_datetime: pd.Timestamp
     # config_fpath: Union[Path, None] = None # Path("configs/calibrate_3rd_imdc_default.yaml")
     config_fpath: Path
     #  ^  Specifying a config is optional. If not specified, use only defaults
@@ -51,23 +55,18 @@ class ProgramConfig(BaseConfig):
     calculation_end_epiweek: int = 40  # Of the next year
     end_in_next_year: bool = True  # Whether the calculation end epiweek is in the next year (e.g. 40 of the next year)
 
-    # sample_trajectories_from: Literal["each_sample", "entire_ensemble"] = (
-    #     "each_sample"
-    # )
-    # #  ^ Method to obtain trajectories from which outbreak features are calculated.
     num_stochastic_trajectories = 100
+
+    export_feature_samples: bool = False
+    export_feature_stats: bool = True
+    # export_
 
     # disease_cases_dir: Path = Path("data/disease/dengue_cases_uf_weekly")
 
     def preprocess(self, *args, **kwargs):
         super().preprocess(*args, **kwargs)
 
-        # # If output_dir is not provided, construct it from the location-year format.
-        # if not hasattr(self, "output_dir") or self.output_dir is None:
-        #     self.output_dir = self.output_dir_fmt.format(
-        #         location_id=self.location_id,
-        #         year=self.year,
-        #     )
+        self.run_datetime = pd.Timestamp.now(tz="UTC")
 
         # If year was not provided, try to assert it from the output_dir name
         # using the location-year format.
@@ -115,6 +114,17 @@ class ProgramData:
     augm_param_samples_df: pd.DataFrame
     augm_mean_cases_df: pd.DataFrame
     # ^ Augmented so each row represents a trajectory to calculate outbreak features from
+
+    cases_df: pd.DataFrame
+    # ^ Stochastic trajectories of disease cases to calculate outbreak features.
+    #    Signature: df.loc[(*trajetory_id_vars*), time]
+
+    feature_samples_df: pd.DataFrame
+    # ^ Outbreak features from each individual trajectory (full data).
+    #   Signature: df.loc[(*trajetory_id_vars*), feature_name]
+    feature_stats_df: pd.DataFrame
+    # ^ Summary statistics of outbreak features.
+    #   Signature: df.loc[(*groupby_vars*), (feature_name, stat_name)] = stat_value
 
 
 def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
@@ -219,6 +229,11 @@ def main(argv: Union[list[str], None] = None) -> None:
     _validate_main_data(data)
     # observations_sr = DiseaseTimeSeriesCache(disease_cases_dir).get_location(location_id)
 
+    # Sample trajectories to calculate features from
+    # ===================
+    data.augm_param_samples_df, data.augm_mean_cases_df = (
+        _trajectories_from_each_sample(cfg, data)
+    )
 
     # Define calculation window
     # ===================
@@ -230,26 +245,31 @@ def main(argv: Union[list[str], None] = None) -> None:
         cfg.year + cfg.end_in_next_year,
         cfg.calculation_end_epiweek
     )
-    data.sim_cfg.temporal.zero_date
+    zero_date = pd.Timestamp(data.sim_cfg.temporal.zero_date)
 
-    # Sample trajectories to calculate features from
-    # ===================
-    data.augm_param_samples_df, data.augm_mean_cases_df = (
-        _trajectories_from_each_sample(cfg, data)
+
+    # Construct trajectories and calculate outbreak features
+    # ===============
+    data.cases_df = _apply_stochastic_observation_model(
+        cfg, data
     )
-    # if cfg.sample_trajectories_from in ["each_sample"]:
-    # augm_param_samples_df, augm_mean_cases_df = (
-    #     _trajectories_from_each_sample(cfg, data)
-    # )
-    # elif cfg.sample_trajectories_from in ["entire_ensemble"]:
-    #     pass
-    # else:
-    #     raise ValueError(
-    #         f"Invalid value for `sample_trajectories_from`: "
-    #         f"{cfg.sample_trajectories_from}. "
-    #     )
 
-    print("BREAK")
+    data.feature_samples_df = outbreak_features_from_trajectories(
+        cases_df=data.cases_df,
+        zero_date=zero_date,
+        window_start=window_start,
+        window_end=window_end,
+        feature_names=cfg.outbreak_feature_names,
+    )
+
+    data.feature_stats_df = outbreak_feature_stats(
+        data.feature_samples_df
+    )
+
+    # ==========
+    _export_data(cfg, data)
+
+    return
 
 
 def _validate_main_data(
@@ -259,6 +279,14 @@ def _validate_main_data(
     sim_cfg = data.sim_cfg
     param_samples_df = data.param_samples_df
     mean_cases_df = data.mean_cases_df
+
+    # --- Validate sim_cfg
+    if sim_cfg.observation_model.model != "negative_binomial":
+        print(
+            "WARNING: Currently only supports negative binomial observation model, "
+            "but got '{sim_cfg.observation_model.model}'. Will perform calculations"
+            " but they may not match the model used to generate the data."
+        )
 
     # --- Validate param_samples_df
     _required = [
@@ -305,14 +333,70 @@ def _trajectories_from_each_sample(
     augm_mean_cases_df.index = augm_index
 
     # Augment the posterior samples (parameter sets)
-    augm_posterior_samples_df = param_samples_df.reindex(i_sim_index)
-    augm_posterior_samples_df.index = augm_index
+    augm_param_samples_df = param_samples_df.reindex(i_sim_index)
+    augm_param_samples_df.index = augm_index
 
-    return augm_posterior_samples_df, augm_mean_cases_df
-
-
+    return augm_param_samples_df, augm_mean_cases_df
 
 
+def _apply_stochastic_observation_model(
+        cfg: ProgramConfig,
+        data: ProgramData,
+):
+    augm_mean_cases_df = data.augm_mean_cases_df
+    augm_param_samples_df = data.augm_param_samples_df
+
+    # Apply the 2D reshaping to sample trajectories with vectorized numpy
+    # =======================
+    # Standard shape: (i_augmented_sample, i_time)
+    _expectancy = augm_mean_cases_df.values
+    _overdisp = augm_param_samples_df["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
+    p = _overdisp / (_overdisp + _expectancy)
+
+    # Sample with negative binomial (observation model)
+    # ============================
+    rng = np.random.default_rng(seed=42)
+    cases_vec: np.ndarray = rng.negative_binomial(
+        n=_overdisp, p=p, size=_expectancy.shape
+    )
+    cases_df = pd.DataFrame(
+        cases_vec,
+        index=augm_mean_cases_df.index,
+        columns=augm_mean_cases_df.columns
+    )
+
+    return cases_df
+
+
+def _export_data(
+        cfg: ProgramConfig,
+        data: ProgramData,
+):
+    if cfg.export_feature_samples and hasattr(data, "feature_samples_df"):
+        _fpath = cfg.output_dir / "outbreak_feature_samples.csv.gz"
+        data.feature_samples_df.to_csv(
+            _fpath,
+            index=True,
+            compression={
+                "method": "gzip",
+                "compresslevel": 9,
+            }
+        )
+        print(f"Exported: {_fpath}")
+
+
+    if cfg.export_feature_stats and hasattr(data, "feature_stats_df"):
+        # _fpath = cfg.output_dir / "outbreak_feature_stats.csv.gz"
+        _fpath = cfg.output_dir / "outbreak_feature_stats.csv"
+        data.feature_stats_df.to_csv(
+            _fpath,
+            index=True,
+            compression={
+                "method": "gzip",
+                "compresslevel": 9,
+            }
+        )
+        print(f"Exported: {_fpath}")
 
 if __name__ == '__main__':
     main(sys.argv[1:])
