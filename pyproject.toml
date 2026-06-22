@@ -34,6 +34,7 @@ dev = [
 
 [project.scripts]
 calibrate-3rd-imdc = "scripts.calibrate_3rd_imdc.main:main"
+calc-outbreak-features-from-trajectories = "scripts.calc_outbreak_features_from_posteriors:main"
 
 
 [build-system]
