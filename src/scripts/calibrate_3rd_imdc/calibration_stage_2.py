@@ -175,7 +175,8 @@ def _postprocess_stage_2_simulations(
             df[df["posterior_weight"] >= w_cutoff]
             .sample(
                 n=max_samples,
-                weights="posterior_weight",
+                replace=False,
+                weights=None,  # No weights when just reducing nr. of samples
                 random_state=rng,
             )
             .sort_values("posterior_weight")
@@ -191,7 +192,6 @@ def _postprocess_stage_2_simulations(
     )
 
     return post_samples_df, post_kde
-
 
 
 def _stage_2_plots_and_diagnostics(

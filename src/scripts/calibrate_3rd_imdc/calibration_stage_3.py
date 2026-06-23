@@ -255,7 +255,8 @@ def _postprocess_stage_3_simulations(
             df[df["posterior_weight"] >= w_cutoff]
             .sample(
                 n=max_samples,
-                weights="posterior_weight",
+                replace=False,
+                weights=None,  # No weights when just reducing nr. of samples
                 random_state=rng,
             )
             .sort_values("posterior_weight")
