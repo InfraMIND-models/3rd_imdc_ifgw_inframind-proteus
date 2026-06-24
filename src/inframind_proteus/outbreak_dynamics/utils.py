@@ -12,11 +12,12 @@ from collections import OrderedDict, defaultdict
 from copy import deepcopy
 from pathlib import Path
 from datetime import datetime
-from typing import Any
+from typing import Any, Tuple
 
 import numpy as np
 from epiweeks import Week as EpiWeek
 import pandas as pd
+from matplotlib import pyplot as plt
 from pathos.multiprocessing import ProcessPool
 import yaml
 
@@ -430,3 +431,78 @@ def map_parallel_or_sequential_chunks(
     results = sum(chunked_results, list())
 
     return results
+
+
+def make_axes_seq(
+        num_axes, max_cols=3, total_width=9., ax_height=3.
+) -> Tuple[plt.Figure, list[plt.Axes]]:
+    """Create a 1D sequence of matplotlib `Axes` objects in figure, where
+    axes are disposed in a grid of `max_cols` columns and as many rows
+    as needed.
+
+    Advantages of using this function instead of a call to
+    `matplotlib.subplots` are:
+    - You can directly specify the number of Axes objects instead of the
+      numbers of rows and columns.
+    - Axes objects are returned as a flat, 1D vector, in row-major order.
+    - If `num_axes` is not a multiple of `max_cols`, the last row
+     will contain empty spaces instead of unused Axes objects.
+
+    Parameters
+    ----------
+    num_axes : int
+        Total number of `Axes` objects to create in the figure.
+    max_cols : int, optional
+        Number of `Axes` objects in each row.
+    total_width : float
+        Width of the entire figure in default matplotlib units.
+    ax_height : float
+        Height of each Axes object in default matplotlib units.
+
+    Returns
+    -------
+    fig : matplotlib.Figure
+        A new figure containing the sequence of axes.
+    axes : list[matplotlib.Axes]
+        The 1D sequence of axes objects.
+    """
+    # Basic dependent numbers
+    num_rows = (num_axes - 1) // max_cols + 1
+
+    # Empty figure initialization and gridspec object (divides space into grids).
+    fig = plt.figure(figsize=(total_width, num_rows * ax_height))
+    gridspecs = fig.add_gridspec(num_rows, max_cols)
+
+    # Creates the list of axes with the required number of axes
+    axes = [fig.add_subplot(gridspecs[i]) for i in range(num_axes)]
+
+    return fig, axes
+
+
+def rotate_ax_labels(ax, angle=60, xy="x", which="major"):
+    """
+    Rotate tick labels of a matplotlib axis.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axis whose tick labels will be rotated.
+    angle : float, default=60
+        The rotation angle in degrees.
+    xy : {'x', 'y'}, default='x'
+        Specifies whether to rotate x-axis or y-axis labels.
+    which : {'major', 'minor', 'both'}, default='major'
+        Specifies which tick labels to rotate.
+
+    Returns
+    -------
+    None
+        This function modifies the axis in place.
+    """
+    labels = (
+        ax.get_xticklabels(which=which)
+        if xy == "x" else ax.get_yticklabels(which=which))
+
+    for label in labels:
+        label.set(rotation=angle, horizontalalignment='right')
+
