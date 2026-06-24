@@ -122,7 +122,7 @@ def run_calibration_stage_3(
 
     # Simulation postprocessing
     # =========================
-    post_samples_df, post_kde = (
+    post_samples_df, post_kde, cases_df = (
         _postprocess_stage_3_simulations(
             cfg, params_df, sim_results, simulator
         )
@@ -145,6 +145,7 @@ def run_calibration_stage_3(
         sampled_param_names=sampled_params_df.columns.tolist(),
         post_kde=post_kde,
         post_samples_df=post_samples_df,
+        cases_df=cases_df,
         sim_cfg=sim_cfg,
         sim_results=sim_results,
         simulator=simulator,
@@ -158,6 +159,7 @@ def run_calibration_stage_3(
         sampled_param_names=sampled_params_df.columns.tolist(),
         sim_results=sim_results,
         simulator=simulator,
+        cases_df=cases_df,
     )
 
     return Stage3Outputs(
@@ -209,7 +211,7 @@ def _postprocess_stage_3_simulations(
         params_df: pd.DataFrame,
         sim_results: SimulationOutput,
         simulator: RenewalSimulator
-) -> tuple[pd.DataFrame, gaussian_kde]:
+) -> tuple[pd.DataFrame, gaussian_kde, pd.DataFrame]:
     """"""
 
     # Build posterior distributions
@@ -271,7 +273,45 @@ def _postprocess_stage_3_simulations(
         weights=post_samples_df["posterior_weight"]
     )
 
-    return post_samples_df, post_kde
+    # Predictiion intervals from re-sampled trajectories
+    # ===================
+    # OBS: This code below is directly adapted from its prototype.
+    # The entire re-sampling will be done later by dedicated methods.
+    # The code can be shortened and improved!
+    rng = np.random.default_rng(seed=42)
+
+    # --- Re-sample from the posterior to choose trajectories to sample from
+    num_trajectories = 1000
+    re_sample_params: pd.DataFrame = post_samples_df.sample(
+        n=num_trajectories,
+        replace=True,
+        weights=post_samples_df["posterior_weight"],
+        random_state=rng,
+    )
+
+    re_sample_mean_cases = sim_results.mean_cases_df.reindex(re_sample_params.index)
+
+    # After identifying original simulations, reset the indexes to sequential
+    for obj in [re_sample_params, re_sample_mean_cases]:
+        obj.reset_index(drop=True, inplace=True)
+        obj.index.name = "i_sample"
+
+    # --- Reshape to 2D arrays and sample everything at once
+    # Standard shape: (i_sample, i_time)
+    _expectancy = re_sample_mean_cases.values
+    _overdisp = re_sample_params["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
+    p = _overdisp / (_overdisp + _expectancy)
+
+    cases_vec: np.ndarray = rng.negative_binomial(
+        n=_overdisp, p=p, size=_expectancy.shape
+    )
+    cases_df = pd.DataFrame(
+        cases_vec,
+        index=re_sample_params.index,
+        columns=re_sample_mean_cases.columns
+    )
+
+    return post_samples_df, post_kde, cases_df
 
 
 def _stage_3_plots_and_diagnostics(
@@ -283,6 +323,7 @@ def _stage_3_plots_and_diagnostics(
         sampled_param_names: list[str],
         post_kde: gaussian_kde,
         post_samples_df: pd.DataFrame,
+        cases_df: pd.DataFrame,
         sim_cfg: SimulationConfig,
         sim_results: SimulationOutput,
         simulator: RenewalSimulator
@@ -332,45 +373,6 @@ def _stage_3_plots_and_diagnostics(
     fig.savefig(out_dir / "stage3_prior-posterior_histograms.pdf")
     plt.close(fig)
 
-    # Predictiion intervals from re-sampled trajectories
-    # ===================
-    # OBS: This code below is directly adapted from its prototype.
-    # The entire re-sampling will be done later by dedicated methods.
-    # The code can be shortened and improved!
-    rng = np.random.default_rng(seed=42)
-
-    # --- Re-sample from the posterior to choose trajectories to sample from
-    num_trajectories = 1000
-    re_sample_params: pd.DataFrame = post_samples_df.sample(
-        n=num_trajectories,
-        replace=True,
-        weights=post_samples_df["posterior_weight"],
-        random_state=rng,
-    )
-
-    re_sample_mean_cases = sim_results.mean_cases_df.reindex(re_sample_params.index)
-
-    # After identifying original simulations, reset the indexes to sequential
-    for obj in [re_sample_params, re_sample_mean_cases]:
-        obj.reset_index(drop=True, inplace=True)
-        obj.index.name = "i_sample"
-
-    # --- Reshape to 2D arrays and sample everything at once
-    # Standard shape: (i_sample, i_time)
-    _expectancy = re_sample_mean_cases.values
-    _overdisp = re_sample_params["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
-    p = _overdisp / (_overdisp + _expectancy)
-
-    cases_vec: np.ndarray = rng.negative_binomial(
-        n=_overdisp, p=p, size=_expectancy.shape
-    )
-    cases_df = pd.DataFrame(
-        cases_vec,
-        index=re_sample_params.index,
-        columns=re_sample_mean_cases.columns
-    )
-
-    cases_df
 
     # --- Visualize sampled trajectories
     fig, ax = plt.subplots()
@@ -415,6 +417,7 @@ def _export_stage3_data(
         # post_kde: gaussian_kde,
         sim_results: SimulationOutput,
         simulator: RenewalSimulator,
+        cases_df: pd.DataFrame,
 ):
     """"""
     data_out_dir, plots_out_dir = prepare_output_subdirs(
@@ -462,4 +465,23 @@ def _export_stage3_data(
             "method": "gzip",
             "compresslevel": 9,
         },
+    )
+
+    # --- Export summary of sampled cases trajectories
+    df = pd.DataFrame({
+        "mean": cases_df.mean(),
+        "median": cases_df.median(),
+        "std": cases_df.std(),
+        "q025": cases_df.quantile(0.025),
+        "q250": cases_df.quantile(0.25),
+        "q750": cases_df.quantile(0.75),
+        "q975": cases_df.quantile(0.975),
+        "min": cases_df.min(),
+        "max": cases_df.max(),
+    })
+    df.index.name = "date"
+
+    df.to_csv(
+        data_out_dir / "stage3_case_stats_trajectories.csv",
+        index=True
     )
