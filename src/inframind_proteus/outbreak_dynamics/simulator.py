@@ -23,6 +23,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import NoneType
 from typing import Literal, Any
 
 import numba as nb
@@ -38,10 +39,11 @@ from .initial_infections import (
     parse_initial_infections_config,
 )
 from .rt_models import BaseRT, LogisticRT, get_rt_model
-from .sampling import SamplingConfig, parse_calibration_sampling_config
+from .sampling import SamplingConfig, parse_calibration_sampling_config, build_calibration_params_df
 from .scoring import nbinom_ppf_cf, wis_score_vectorized, rmse_vectorized, nb_loglikelihood_vectorized, \
     coverages_vectorized
 from .utils import parse_timestamp, save_yaml_dict
+from .. import BaseConfig
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +51,7 @@ from .utils import parse_timestamp, save_yaml_dict
 # ---------------------------------------------------------------------------
 
 @dataclass
-class TemporalConfig:
+class TemporalConfig(BaseConfig):
     """Temporal settings for a simulation run.
 
     Attributes
@@ -74,7 +76,7 @@ class TemporalConfig:
 
 
 @dataclass
-class LocationConfig:
+class LocationConfig(BaseConfig):
     """Location identification for a simulation run.
 
     Attributes
@@ -96,7 +98,7 @@ class LocationConfig:
 
 
 @dataclass
-class ObservationModelConfig:
+class ObservationModelConfig(BaseConfig):
     """Observation model configuration.
 
     Attributes
@@ -120,7 +122,7 @@ class ObservationModelConfig:
 
 
 @dataclass
-class ScoringConfig:
+class ScoringConfig(BaseConfig):
     """Scoring configuration for calibration mode.
 
     Attributes
@@ -137,20 +139,25 @@ class ScoringConfig:
     )
 
 @dataclass
-class OutputConfig:
+class OutputConfig(BaseConfig):
     """Output/export configuration.
 
     Attributes
     ----------
     main_dir:
         Main output directory under which all results will be saved.
+    keep_rt_trajectories:
+        Whether to keep the full R(t) trajectories for all simulations
+        in the output data structure. Uses more memory if true.
     """
 
     main_dir: Path = Path("outputs/_DEFAULT")
 
+    keep_rt_trajectories: bool = False
+
 
 @dataclass
-class SimulationConfig:
+class SimulationConfig(BaseConfig):
     """Top-level configuration for the renewal simulator.
 
     Attributes
@@ -258,11 +265,14 @@ class SimulationOutput:
 
     Attributes
     ----------
+    rt_df:
+        Reproduction number trajectories for all simulations.
+        ``None`` if ``config.output.keep_rt_trajectories`` is ``False``.
     infec_df:
         Abstract infection counts.
         Index = ``i_simulation``, columns = time step values in days.
-    cases_df:
-        Sampled reported case counts (observation model draws).
+    mean_cases_df:
+        Expectancy of reported case counts.
         Same shape as ``infec_df``.
     case_beam_df:
         Deterministic quantile case beam.
@@ -272,12 +282,12 @@ class SimulationOutput:
     config:
         The :class:`SimulationConfig` used to produce these outputs.
     """
-
     infec_df: pd.DataFrame
-    cases_df: pd.DataFrame
+    mean_cases_df: pd.DataFrame
     case_beam_df: pd.DataFrame
     scoring: SimulationScoring | None
     config: SimulationConfig
+    rt_df: pd.DataFrame | None = None
 
     @classmethod
     def concat(
@@ -298,13 +308,15 @@ class SimulationOutput:
         SimulationOutput
             A new instance with concatenated data frames and arrays.
         """
+        rt_dfs = [o.rt_df for o in objs if o.rt_df is not None]
         return cls(
             infec_df=pd.concat([o.infec_df for o in objs], axis=0),
-            cases_df=pd.concat([o.cases_df for o in objs], axis=0),
+            mean_cases_df=pd.concat([o.mean_cases_df for o in objs], axis=0),
             case_beam_df=pd.concat([o.case_beam_df for o in objs], axis=0),
             scoring=SimulationScoring.concat(
                 [o.scoring for o in objs if o.scoring is not None]
             ),
+            rt_df=pd.concat(rt_dfs, axis=0) if rt_dfs else None,
             config=objs[0].config,  # Assumes all outputs share the same config
         )
 
@@ -482,16 +494,17 @@ class RenewalSimulator:
         # 3. R(t) — shape (num_sim, gt_steps + num_steps)
         #
         # The RT time grid is in days from zero_date.  The warm-up window
-        # starts at (sim_start − gt_steps × step_dt) days from zero_date,
+        # starts at (sim_start − initial_steps × step_dt) days from zero_date,
         # so R(t) parameters such as rt_logist_start are expressed as days
         # from zero_date independently of the warm-up size.
         # ------------------------------------------------------------------
         sim_start_day = float((cfg.temporal.sim_start - cfg.temporal.zero_date).days)
-        t_start = sim_start_day - gt_steps * step_dt
+        initial_steps = cfg.initial_infections.num_steps
+        t_start = sim_start_day - initial_steps * step_dt
 
         rt_vec = self.rt_model.generate(
             params_df=_params,
-            num_time_steps=gt_steps + num_steps,
+            num_time_steps=initial_steps + num_steps,
             step_dt=step_dt,
             t_start=t_start,
         )
@@ -520,7 +533,7 @@ class RenewalSimulator:
         rng = np.random.default_rng(cfg.rng_seed)
         infec_sim = infec_vec[:, gt_steps:]  # (num_sim, num_steps)
 
-        cases_vec, case_beam_df = self._apply_observation_model(
+        mean_cases_vec, case_beam_df = self._apply_observation_model(
         # case_beam_df = self._apply_observation_model(
             infec_sim, _params, rng,
             population_size=cfg.location.population_size,
@@ -541,10 +554,10 @@ class RenewalSimulator:
         infec_df.index = _params.index
         infec_df.columns.name = "t"
 
-        cases_df = pd.DataFrame(cases_vec, columns=sim_timestamps)
-        # cases_df.index.name = "i_simulation"
-        cases_df.index = _params.index
-        cases_df.columns.name = "t"
+        mean_cases_df = pd.DataFrame(mean_cases_vec, columns=sim_timestamps)
+        # mean_cases_df.index.name = "i_simulation"
+        mean_cases_df.index = _params.index
+        mean_cases_df.columns.name = "t"
 
         case_beam_df.columns = sim_timestamps
         case_beam_df.columns.name = "t"
@@ -562,12 +575,32 @@ class RenewalSimulator:
         else:
             scoring = None
 
+        # Etc
+        # =============
+        if cfg.output.keep_rt_trajectories:
+            # Reproduce the time grid from the RT logistic model
+            rt_datetime_grid = pd.date_range(
+                start=(cfg.temporal.sim_start - pd.Timedelta(initial_steps * step_dt, unit="D")),
+                periods=initial_steps + num_steps,
+                freq=pd.Timedelta(step_dt, unit="D"),
+                name="date",
+            )
+            rt_df = pd.DataFrame(
+                rt_vec,
+                index=_params.index,
+                columns=rt_datetime_grid,
+            )
+        else:
+            rt_df = None
+
+
         return SimulationOutput(
             infec_df=infec_df,
-            cases_df=cases_df,
+            mean_cases_df=mean_cases_df,
             case_beam_df=case_beam_df,
             scoring=scoring,
             config=cfg,
+            rt_df=rt_df,
         )
 
     def run_sequential_chunks(
@@ -610,6 +643,35 @@ class RenewalSimulator:
             step_dt=self._step_dt,
             initial_config=self.config.initial_infections,
         )
+
+    def build_simulation_data(
+            self,
+            config: SimulationConfig = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Build auxiliary data frames for simulations.
+
+        This method replaces commonly used code for setting up
+        a simulation.
+        """
+        # ---
+        config = config or self.config
+
+        # Data frame with all model parameters
+        params_df = build_calibration_params_df(
+            config.num_simulations, config.sampling
+        )
+        # Re-assign num_simulations, since prev. step may change it
+        config.num_simulations = params_df.shape[0]
+
+        # Initial infections for the warm-up window
+        initial_infec_df = build_initial_infec_df(
+            config.num_simulations,
+            0,  # No longer in use
+            config.temporal.step_dt,
+            config.initial_infections
+        )
+
+        return params_df, initial_infec_df
 
     @staticmethod
     def _run_renewal_loop(
@@ -700,8 +762,9 @@ class RenewalSimulator:
 
         Returns
         -------
-        cases_vec : np.ndarray
-            Sampled case counts.  Shape ``(num_simulations, num_time_steps)``.
+        mean_cases_vec : np.ndarray
+            Expectancy of the number of cases.
+            Shape ``(num_simulations, num_time_steps)``.
             dtype int64.
         case_beam_df : pd.DataFrame
             Deterministic case beam.
@@ -732,14 +795,20 @@ class RenewalSimulator:
             scale_f = params_df["notif_scaling_factor"].to_numpy()[:, np.newaxis]
 
         # Expected reported cases; clip to avoid negative expectancies
-        expectancy = np.clip(infec_vec * scale_f, 0.0, None)
+        expectancy: np.ndarray = np.clip(infec_vec * scale_f, 0.0, None)
+
+        if np.isnan(expectancy).any():
+            expectancy[np.isnan(expectancy)] = 0.
+            print("WARNING: NaN values found in expectancy; replaced with 0.")
 
         # NB success probability: p = n / (n + μ)
         # When expectancy = 0 → p = 1 → NB always draws 0 (correct)
         p = overdisp / (overdisp + expectancy)
 
-        # Stochastic sample (integer counts)
-        cases_vec = rng.negative_binomial(n=overdisp, p=p)
+        # # Stochastic sample (integer counts) (DISABLED)
+        # cases_vec = rng.negative_binomial(n=overdisp, p=p)
+        # Store the mean for future trajectory sampling
+        mean_cases_vec = expectancy
 
         # Deterministic quantile beam via Cornish-Fisher approximation
         beam_frames = [
@@ -756,8 +825,11 @@ class RenewalSimulator:
             names=["quantile", "i_simulation"],
         )
 
-        return cases_vec, case_beam_df
-        # return case_beam_df
+        # Mean cases, allowing to sample trajectories outside this function
+        mean_cases_vec = expectancy
+
+        # return cases_vec, case_beam_df
+        return mean_cases_vec, case_beam_df
 
     @staticmethod
     def score_simulations(
@@ -1006,7 +1078,7 @@ class RenewalSimulator:
 
         # Output config
         out_main_dir = Path(output_cfg.get("main_dir", defaults.output.main_dir))
-
+        keep_rt_trajectories = output_cfg.get("keep_rt_trajectories", defaults.output.keep_rt_trajectories)
 
         config = SimulationConfig(
             mode=mode,
@@ -1039,6 +1111,7 @@ class RenewalSimulator:
             sampling=sampling_cfg,
             output=OutputConfig(
                 main_dir=out_main_dir,
+                keep_rt_trajectories=keep_rt_trajectories,
             ),
             initial_infections=initial_infections_cfg,
             rng_seed=int(sim_cfg.get("rng_seed", defaults.rng_seed)),

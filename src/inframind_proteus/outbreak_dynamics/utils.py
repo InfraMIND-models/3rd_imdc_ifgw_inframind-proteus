@@ -7,11 +7,17 @@ Includes:
 
 from __future__ import annotations
 
+import io
+from collections import OrderedDict, defaultdict
+from copy import deepcopy
 from pathlib import Path
 from datetime import datetime
-from typing import Any
+from typing import Any, Tuple
 
+import numpy as np
+from epiweeks import Week as EpiWeek
 import pandas as pd
+from matplotlib import pyplot as plt
 from pathos.multiprocessing import ProcessPool
 import yaml
 
@@ -20,7 +26,13 @@ import yaml
 # Timestamp parsing
 # ---------------------------------------------------------------------------
 
-def epiweek_to_date(epiweek_int: int) -> pd.Timestamp:
+def year_week_to_date(year: int, week: int) -> pd.Timestamp | pd.NaT:
+    """"""
+    # return EpiWeek(year, week).startdate().isoformat()
+    return pd.Timestamp(EpiWeek(year, week, system="cdc").startdate())
+
+
+def epiweek_to_date(epiweek_int: int) -> pd.Timestamp | pd.NaT:
     """Convert a YYYYWW integer to the start date (Sunday) of that CDC epiweek.
 
     Parameters
@@ -34,11 +46,11 @@ def epiweek_to_date(epiweek_int: int) -> pd.Timestamp:
     pd.Timestamp
         Sunday that opens the given CDC epiweek.
     """
-    from epiweeks import Week
 
-    year = epiweek_int // 100
-    week = epiweek_int % 100
-    return pd.Timestamp(Week(year, week, system="cdc").startdate())
+    return year_week_to_date(year=epiweek_int // 100, week=epiweek_int % 100)
+    # year =
+    # week = epiweek_int % 100
+    # return pd.Timestamp(EpiWeek(year, week, system="cdc").startdate())
 
 
 def parse_timestamp(
@@ -83,16 +95,132 @@ def parse_timestamp(
     )
 
 
-def load_yaml_dict(path: str | Path) -> dict[str, Any]:
+def load_yaml_dict(path: str | Path, safe=True) -> dict[Any, Any]:
     """Load a YAML file and return its contents as a dict."""
+    loader = yaml.SafeLoader if safe else yaml.Loader
     with open(path) as fp:
-        return yaml.safe_load(fp)
+        return yaml.load(fp, Loader=loader) or {}
 
 
-def save_yaml_dict(data: dict[str, Any], path: str | Path) -> None:
+def save_yaml_dict(data: dict[str, Any], path: str | Path, safe=True) -> None:
     """Save a dict to a YAML file."""
+    dumper = yaml.SafeDumper if safe else yaml.Dumper
     with open(path, "w") as fp:
-        yaml.safe_dump(data, fp)
+        yaml.dump(data, fp, Dumper=dumper)
+
+
+def make_yaml_exportable_dict(
+        data: dict,
+        skip_keys: list = None,
+        copy=True,
+):
+    """Converts some data types within a dictionary into other objects
+    that can be read in a file (e.g. strings).
+    Operates recursively through contained dictionaries.
+    Changes are made inplace for all dictionaries.
+
+    Parameters
+    ----------
+    data : dict
+        The input dictionary to be converted.
+    skip_keys : list, optional
+        List of keys to skip during conversion. If a key is in this list, its
+        value will not be converted, even if it is of a type that would normally
+        be converted. Default is None, which means no keys are skipped.
+    copy : bool, optional
+        If True (default), the function will operate on a deep copy
+        of the input dictionary. If False, the function returns the same
+        dictionary, which is modified in place.
+    """
+    skip_keys = skip_keys or list()
+
+    d = deepcopy(data) if copy else data
+
+    for key, val in d.items():
+
+        # Ordered and default dict
+        if isinstance(val, (OrderedDict, defaultdict)):
+            d[key] = dict(val)
+
+        # pathlib.Path into its string
+        if isinstance(val, Path):
+            d[key] = str(val.expanduser())
+
+        # Timestamps into string repr.
+        if isinstance(val, pd.Timestamp):
+            d[key] = str(val)
+
+        # Specified iterables
+        if isinstance(
+                val, (tuple, np.ndarray)
+        ):
+            d[key] = list(val)
+
+        # Recurse through inner dictionary
+        if isinstance(val, dict):
+            d[key] = make_yaml_exportable_dict(
+                val, skip_keys=skip_keys, copy=False
+            )
+
+    return d
+
+
+def parse_set_arguments_with_yaml(set_args: list[list[str]]):
+    """Parse a list of dot-notation key-value pairs into a nested dictionary.
+
+    This function is designed to handle command-line arguments for setting
+    nested configuration parameters. It takes a list of `[key, value]` pairs,
+    where the key is a string using dot notation (e.g., 'a.b.c') to specify
+    a path in a nested dictionary, and the value is a string representation
+    of the data to be set at that path.
+
+    The value string is parsed using YAML, which allows for automatic
+    type inference of numbers, booleans, lists, and dictionaries.
+
+    Parameters
+    ----------
+    set_args : list[list[str]]
+        A list of two-element lists, where each inner list contains a
+        dot-notation key and its corresponding string value.
+        Example: `[['stage1.num_simulations', '8192'], ['sim_cfg.t0', '2022-01-01']]`
+
+    Returns
+    -------
+    dict
+        A nested dictionary representing the merged configuration overrides.
+
+    Raises
+    ------
+    ValueError
+        If a value string cannot be parsed by the YAML engine.
+    """
+
+    overrides = dict()
+    for key, value in set_args:
+        d = overrides
+        parts = key.split(".")
+        for part in parts[:-1]:
+            # Advance into the nested dictionary, creating if not there
+            if part not in d:
+                d[part] = dict()
+            d = d[part]
+
+        # Try to parse value with YAML engine
+        try:
+            # Use yaml.load to interpret types like int, float, bool, list
+            parsed_value = yaml.load(
+                io.StringIO(value),
+                yaml.SafeLoader
+            )
+        except yaml.parser.ParserError:
+            raise ValueError(
+                f"Failed to parse --set argument for key '{key}': {value}"
+            )
+
+        # Add entry to the nested dictionary
+        d[parts[-1]] = parsed_value
+
+    return overrides
 
 
 def apply_include_exclude_logic(
@@ -303,3 +431,78 @@ def map_parallel_or_sequential_chunks(
     results = sum(chunked_results, list())
 
     return results
+
+
+def make_axes_seq(
+        num_axes, max_cols=3, total_width=9., ax_height=3.
+) -> Tuple[plt.Figure, list[plt.Axes]]:
+    """Create a 1D sequence of matplotlib `Axes` objects in figure, where
+    axes are disposed in a grid of `max_cols` columns and as many rows
+    as needed.
+
+    Advantages of using this function instead of a call to
+    `matplotlib.subplots` are:
+    - You can directly specify the number of Axes objects instead of the
+      numbers of rows and columns.
+    - Axes objects are returned as a flat, 1D vector, in row-major order.
+    - If `num_axes` is not a multiple of `max_cols`, the last row
+     will contain empty spaces instead of unused Axes objects.
+
+    Parameters
+    ----------
+    num_axes : int
+        Total number of `Axes` objects to create in the figure.
+    max_cols : int, optional
+        Number of `Axes` objects in each row.
+    total_width : float
+        Width of the entire figure in default matplotlib units.
+    ax_height : float
+        Height of each Axes object in default matplotlib units.
+
+    Returns
+    -------
+    fig : matplotlib.Figure
+        A new figure containing the sequence of axes.
+    axes : list[matplotlib.Axes]
+        The 1D sequence of axes objects.
+    """
+    # Basic dependent numbers
+    num_rows = (num_axes - 1) // max_cols + 1
+
+    # Empty figure initialization and gridspec object (divides space into grids).
+    fig = plt.figure(figsize=(total_width, num_rows * ax_height))
+    gridspecs = fig.add_gridspec(num_rows, max_cols)
+
+    # Creates the list of axes with the required number of axes
+    axes = [fig.add_subplot(gridspecs[i]) for i in range(num_axes)]
+
+    return fig, axes
+
+
+def rotate_ax_labels(ax, angle=60, xy="x", which="major"):
+    """
+    Rotate tick labels of a matplotlib axis.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axis whose tick labels will be rotated.
+    angle : float, default=60
+        The rotation angle in degrees.
+    xy : {'x', 'y'}, default='x'
+        Specifies whether to rotate x-axis or y-axis labels.
+    which : {'major', 'minor', 'both'}, default='major'
+        Specifies which tick labels to rotate.
+
+    Returns
+    -------
+    None
+        This function modifies the axis in place.
+    """
+    labels = (
+        ax.get_xticklabels(which=which)
+        if xy == "x" else ax.get_yticklabels(which=which))
+
+    for label in labels:
+        label.set(rotation=angle, horizontalalignment='right')
+

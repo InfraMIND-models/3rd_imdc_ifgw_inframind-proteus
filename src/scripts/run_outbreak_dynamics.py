@@ -53,13 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     # --- Generic dot-notation overrides
     parser.add_argument(
         "--set",
-        metavar="KEY=VALUE",
+        metavar="KEY VALUE",
         action="append",
         dest="overrides",
         default=[],
         help=(
             "Override any YAML key using dot-notation. "
-            "Repeatable: --set a.b=1 --set c=2"
+            "Repeatable: --set a.b 1 --set c 2"
         ),
     )
 
@@ -142,7 +142,7 @@ def apply_set_overrides(
     config: dict[str, Any],
     overrides: list[str],
 ) -> dict[str, Any]:
-    """Apply ``--set KEY=VALUE`` overrides (dot-notation) to a config dict.
+    """Apply ``--set KEY VALUE`` overrides (dot-notation) to a config dict.
 
     Values are cast to int / float / bool when possible; otherwise kept as str.
     """

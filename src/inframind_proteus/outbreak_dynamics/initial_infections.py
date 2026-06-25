@@ -19,8 +19,8 @@ class InitialInfectionsConfig:
     params:
         Method-specific parameters.
     """
-
     method: str = "ones"
+    num_steps: int = 7
     params: dict[str, float] = field(default_factory=dict)
 
 
@@ -35,6 +35,12 @@ def parse_initial_infections_config(config_dict: dict) -> InitialInfectionsConfi
             "Supported methods: ['ones']"
         )
 
+    num_steps = init_cfg.get("num_steps", InitialInfectionsConfig.num_steps)
+    if num_steps <= 0:
+        raise ValueError(
+            f"initial_infections.num_steps must be > 0, got {num_steps}"
+        )
+
     params_raw = init_cfg.get("params", {}) or {}
     if not isinstance(params_raw, dict):
         raise ValueError("initial_infections.params must be a dictionary")
@@ -46,7 +52,7 @@ def parse_initial_infections_config(config_dict: dict) -> InitialInfectionsConfi
 
 def build_initial_infec_df(
     num_simulations: int,
-    gt_max_steps: int,
+    gt_max_steps: int,  # UNUSED (deprecated in favor of initial_config.num_steps)
     step_dt: int,
     initial_config: InitialInfectionsConfig,
 ) -> pd.DataFrame:
@@ -59,10 +65,10 @@ def build_initial_infec_df(
         raise ValueError(
             f"num_simulations must be > 0, got {num_simulations}"
         )
-    if gt_max_steps <= 0:
-        raise ValueError(
-            f"gt_max_steps must be > 0, got {gt_max_steps}"
-        )
+    # if gt_max_steps <= 0:
+    #     raise ValueError(
+    #         f"gt_max_steps must be > 0, got {gt_max_steps}"
+    #     )
     if step_dt <= 0:
         raise ValueError(f"step_dt must be > 0, got {step_dt}")
 
@@ -72,9 +78,11 @@ def build_initial_infec_df(
             "build_initial_infec_df currently supports only method 'ones'"
         )
 
-    warmup_cols = list(range(0, gt_max_steps * step_dt, step_dt))
+    # warmup_cols = list(range(0, gt_max_steps * step_dt, step_dt))  # Old: Based on generation time
+    num_steps = initial_config.num_steps  # New: Independent parameter
+    warmup_cols = list(range(0, num_steps * step_dt, step_dt))
     initial_infec_df = pd.DataFrame(
-        np.ones((num_simulations, gt_max_steps), dtype=float),
+        np.ones((num_simulations, num_steps), dtype=float),
         columns=warmup_cols,
     )
     initial_infec_df.index.name = "i_simulation"
