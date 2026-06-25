@@ -13,7 +13,8 @@ def main():
 
     # --- Regex
     pattern = "??_[0-9][0-9][0-9][0-9]"
-    subdirs = glob.glob(str(main_out_dir / pattern))
+    subdirs = list(glob.glob(str(main_out_dir / pattern)))
+    subdirs.sort()
 
     # -()- Call to main() approach
     # ============================
@@ -25,7 +26,7 @@ def main():
     _contents  = list(subdirs)[:]
 
     map_parallel_or_sequential(
-        _task, _contents, ncpus=6
+        _task, _contents, ncpus=8
     )
 
     #

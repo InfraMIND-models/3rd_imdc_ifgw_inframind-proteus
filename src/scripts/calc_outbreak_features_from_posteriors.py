@@ -5,15 +5,6 @@ Mainly designed to calculate outbreak features after `calibrate-3rd-imdc`
 has been run.
 
 """
-import time
-
-
-def log_progress(msg, _time=None):
-    _time = str(_time or "")
-    print(f"[{_time}] {msg}")
-
-log_progress("Importing libraries", time.process_time())
-
 import argparse
 import re
 import sys
@@ -61,7 +52,7 @@ class ProgramConfig(BaseConfig):
     #  ^ Define which features should be calculated.
 
     # --- Temporal config, epiweek-based (year-agnostic)
-    calculation_start_epiweek: int = 41
+    calculation_start_epiweek: int = 26
     calculation_end_epiweek: int = 40  # Of the next year
     end_in_next_year: bool = True  # Whether the calculation end epiweek is in the next year (e.g. 40 of the next year)
 
@@ -206,7 +197,6 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
 
 
 def main(argv: Union[list[str], None] = None) -> None:
-    log_progress("Starting main", time.process_time())
 
     # --- Program initialization sequence
     args_dict = parse_args_get_dict(argv)
@@ -222,7 +212,6 @@ def main(argv: Union[list[str], None] = None) -> None:
 
     # Load main data
     # ====================
-    log_progress("Loading main data", time.process_time())
     if not cfg.output_dir.exists():
         raise FileNotFoundError(
             f"Output directory {cfg.output_dir} does not exist. "
@@ -250,7 +239,6 @@ def main(argv: Union[list[str], None] = None) -> None:
 
     # Sample trajectories to calculate features from
     # ===================
-    log_progress("Processing data", time.process_time())
     data.augm_param_samples_df, data.augm_mean_cases_df = (
         _trajectories_from_each_sample(cfg, data)
     )
@@ -287,7 +275,6 @@ def main(argv: Union[list[str], None] = None) -> None:
     )
 
     # ==========
-    log_progress("Exporting data", time.process_time())
     _export_data(cfg, data)
 
     return
