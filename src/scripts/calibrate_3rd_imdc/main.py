@@ -27,7 +27,7 @@ from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.utils import (
     parse_set_arguments_with_yaml, load_yaml_dict, year_week_to_date,
-    apply_include_exclude_logic, map_parallel_or_sequential, make_yaml_exportable_dict, save_yaml_dict
+    apply_include_exclude_logic, map_parallel_or_sequential, make_yaml_exportable_dict, save_yaml_dict, add_set_argument
 )
 from scripts.calibrate_3rd_imdc.program_config import ProgramConfig
 from scripts.calibrate_3rd_imdc.calibration_stage_1 import (
@@ -62,17 +62,7 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
     )
 
     # --- Generic nested `--set` argument.
-    parser.add_argument(
-        "--set",
-        nargs=2,
-        action="append",
-        default=list(),
-        metavar=("KEY", "VALUE"),
-        help="Set a configuration parameter using dot notation (e.g. "
-             "--set stage1.num_simulations 4096)."
-             " Can be used multiple times.",
-    )
-
+    add_set_argument(parser)
 
     # ======
 
