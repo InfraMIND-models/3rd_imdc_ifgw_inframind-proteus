@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Union, Tuple, Any
 
 import pandas as pd
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, norm as normal_distribution
 
 from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics.outbreak_features import OutbreakFeaturePredictionsCache
@@ -68,6 +68,9 @@ class ProgramConfig(BaseConfig):
     output_dir: Path = Path("outputs/validation_round_projections")
 
     uf_table_fpath = Path("data/demographic/uf_table.csv")
+
+    num_projection_samples = 1000  # Final parameter samples to have in the end
+    projection_sampling_seed = 5
 
     use_location_ids: list = []
 
@@ -138,6 +141,8 @@ class ProgramData:
     # ...
     # For all years available from calibration
 
+    posterior_samples_df: pd.DataFrame
+    # Final product for each location and projection year
 
 def parse_args_get_dict(argv) -> dict:
     """"""
@@ -236,6 +241,7 @@ def _load_global_data(cfg: ProgramConfig, data: ProgramData):
 
 def _process_location(location_id, cfg: ProgramConfig, data: ProgramData):
     """"""
+    print(f"Processing {location_id=}")
     _load_and_preprocess_location_data(location_id, cfg, data)
 
     for proj_year in data.projection_years:
@@ -247,16 +253,27 @@ def _process_location(location_id, cfg: ProgramConfig, data: ProgramData):
         )
 
         # --- Combine with predicted outbreak features
-        _update_priors_with_outbreak_features(
-            location_id,
-            proj_year,
+        likelihood_sr = _calc_likelihood_of_outbreak_features(
+            location_id, proj_year,
             avail_samples_df=avail_samples_df,
             cfg=cfg, data=data
         )
 
+        # --- Build posterior and obtain final samples
+        posterior_df = _calc_posterior_samples(
+            location_id, proj_year,
+            avail_samples_df=avail_samples_df,
+            likelihood_sr=likelihood_sr,
+            cfg=cfg, data=data
+        )
 
+        data.posterior_samples_df = posterior_df
 
-    print(f"Processing {location_id=}")
+        # --- Export outputs of this iteration
+        _export_location_outputs(
+            location_id, proj_year,
+            cfg=cfg, data=data
+        )
 
 
 def _load_and_preprocess_location_data(
@@ -264,6 +281,7 @@ def _load_and_preprocess_location_data(
 ):
     """"""
     _ptab = " -- "  # Tabulation of print messages
+    print(f"{_ptab}Loading and preprocessing data {location_id=}")
 
     data.calibration_years = calibration_years = apply_include_exclude_logic(
         all_series=pd.Series(cfg.use_calibration_years),
@@ -297,6 +315,7 @@ def _load_and_preprocess_location_data(
     keys_list = list()
     data_lists = defaultdict(lambda: list())
     for cal_year in calibration_years:
+        _ptab = " -- -- "
         out_dir = (
                 cfg.calibrations_main_dir
                 / cfg.location_year_subdir_fmt.format(
@@ -464,7 +483,7 @@ def _calculate_projection_priors(
     return avail_samples_df
 
 
-def _update_priors_with_outbreak_features(
+def _calc_likelihood_of_outbreak_features(
         location_id,
         proj_year,
         avail_samples_df: pd.DataFrame,
@@ -476,6 +495,8 @@ def _update_priors_with_outbreak_features(
     """
     _ptab = " -- "  # Tabulation of print messages
 
+    # Initialize a likelihood series
+    likelihood_sr = pd.Series(1.0, index=avail_samples_df.index, name="likelihood")
 
     # Peak week
     # ============
@@ -489,23 +510,98 @@ def _update_priors_with_outbreak_features(
             )
         )
 
-        prediction_kde = (
-            gaussian_kde(
-                outb_feats_predicted_samples,
-            )
-        )
-
-        # # --- Would be great, but... not vectorizable :(
-        # prediction_kde.integrate_gaussian(
-        #     mean=each_prediction_mean,
-        #     cov=each_prediction_std**2,
+        # # -()- KDE over the predicted samples
+        # prediction_kde = (
+        #     gaussian_kde(
+        #         outb_feats_predicted_samples,
+        #     )
         # )
-        kde_evals = prediction_kde.evaluate(
-            avail_samples_df[feature_name]
+        # pdf_evals = prediction_kde.evaluate(
+        #     avail_samples_df[feature_name]
+        # )
+
+        # -()- Simple Gaussian fit over all predicted samples
+        mean = outb_feats_predicted_samples.mean()
+        std = outb_feats_predicted_samples.std()
+        dist = normal_distribution(loc=mean, scale=std)
+        pdf_evals = dist.pdf(avail_samples_df[feature_name])
+
+
+        likelihood_sr *= pdf_evals
+
+        # TODO: other outbreak features
+
+
+    return likelihood_sr
+
+
+def _calc_posterior_samples(
+        location_id,
+        proj_year,
+        avail_samples_df: pd.DataFrame,
+        likelihood_sr: pd.Series,
+        cfg: ProgramConfig,
+        data: ProgramData,
+) -> pd.DataFrame:
+    """Calculate posterior samples for the projection year."""
+    _ptab = " -- "  # Tabulation of print messages
+    print(f"{_ptab}Calculating posterior samples for {location_id=} {proj_year=}")
+
+    # --- Calculate posterior weights
+    posterior_weights = avail_samples_df["multiyear_weight"] * likelihood_sr
+    posterior_weights /= posterior_weights.max()  # Normalize to max = 1
+#     posterior_weights /= posterior_weights.sum()  # Normalize to sum = 1
+
+
+    # --- Sample from the prior distribution using the posterior weights
+    sampled_indices = avail_samples_df.sample(
+        n=cfg.num_projection_samples,
+        replace=True,
+        weights=posterior_weights,
+        random_state=cfg.projection_sampling_seed,
+    ).index
+
+    # --- Construct the posterior samples DataFrame, with potentially relevant info
+    posterior_df = (
+        avail_samples_df
+        .reindex(sampled_indices)
+        .reset_index()
+        .drop(columns=["i_simulation", "multiyear_weight"])
+        .rename(columns={"year": "calibration_year"})
+    )
+    # Optional: Keep weights used to sample (not to be reused!)
+    posterior_df["weight"] = posterior_weights.reindex(sampled_indices).values
+
+    posterior_df.index.name = "i_simulation"  # For projection simulations
+
+
+    return posterior_df
+
+
+def _export_location_outputs(
+        location_id, proj_year,
+        cfg: ProgramConfig, data: ProgramData,
+):
+    """"""
+    _ptab = " -- -- "  # Tabulation of print messages
+    # --- Obtain and create the output directory
+    out_dir = (
+        cfg.output_dir
+        / "projections"
+        / cfg.location_year_subdir_fmt.format(
+            location_id=location_id, year=proj_year
         )
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
 
 
-        pass
+    # --- Posterior parameter samples
+    posterior_df = data.posterior_samples_df
+    fpath = out_dir / "projection_parameter_samples.csv"
+    posterior_df.to_csv(fpath, index=True)
+    print(f"{_ptab}Exported posterior parameter samples to {fpath}")
+
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
