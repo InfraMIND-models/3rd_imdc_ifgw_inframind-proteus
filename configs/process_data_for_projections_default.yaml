@@ -1,0 +1,5 @@
+
+use_location_ids: ["SP", "ES"]
+
+exclude_years_by_location:
+  ES: [2021,]  # 2021: Absent cases in data

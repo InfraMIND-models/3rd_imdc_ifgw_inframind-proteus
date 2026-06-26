@@ -61,6 +61,20 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
         help="Path to the output directory.",
     )
 
+    parser.add_argument(
+        "--use-location-ids",  "-l",
+        default=None,
+        type=str,
+        action="append",
+        help=(
+            "List of location IDs to process. Can be specified multiple times. "
+            "Using this argument resets the default list from the program or "
+            "config file. Example: \"-l SP -l MG\" will set use_location_ids to "
+            "['SP', 'MG'], regardless of what other locations have been specified"
+            "on the defaults."
+        ),
+    )
+
     # --- Generic nested `--set` argument.
     add_set_argument(parser)
 
