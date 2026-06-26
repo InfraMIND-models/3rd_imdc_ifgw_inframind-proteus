@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Union, Tuple, Any
 
 import pandas as pd
+from scipy.stats import gaussian_kde
 
 from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
+from inframind_proteus.outbreak_dynamics.outbreak_features import OutbreakFeaturePredictionsCache
 
 print("Importing libraries...")
 from inframind_proteus import BaseConfig
@@ -62,6 +64,7 @@ class ProgramConfig(BaseConfig):
     base_sim_config_fpath: Path = Path("configs/simulation_config_default.yaml")
     calibrations_main_dir: Path = Path("outputs/validation_round_calibration")
     location_year_subdir_fmt: str = "{location_id}_{year}"
+    outbreak_features_predictions_dir: Path = Path("outputs/validation_round_outbreak_features")
     output_dir: Path = Path("outputs/validation_round_projections")
 
     uf_table_fpath = Path("data/demographic/uf_table.csv")
@@ -69,7 +72,7 @@ class ProgramConfig(BaseConfig):
     use_location_ids: list = []
 
     # use_years: list[int] = [2025]  # test
-    use_years: list[int] = [2022, 2023, 2024, 2025]  # Validation round years
+    use_projection_years: list[int] = [2022, 2023, 2024, 2025]  # Validation round projection years
 
     use_calibration_years: list[int] = [
         2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021,
@@ -81,6 +84,8 @@ class ProgramConfig(BaseConfig):
     exclude_years_by_location: dict[str, list[int]] = defaultdict(
         lambda: list(),
     )
+
+    use_outbreak_features: list[str] = OutbreakFeaturePredictionsCache.feature_names
 
     ncpus: int = 1  # Parallelize only over locations.
 
@@ -118,6 +123,7 @@ class ProgramData:
     # =============
     # Will only be loaded within the location process
     observations_sr: pd.Series
+    outb_feats_cache: OutbreakFeaturePredictionsCache
     calibration_years: list[int]
     # param_samples_df: pd.DataFrame
     # max_likelihood_df: pd.DataFrame
@@ -225,7 +231,7 @@ def _load_global_data(cfg: ProgramConfig, data: ProgramData):
         exclude_list=None,
     )
 
-    data.projection_years = cfg.use_years
+    data.projection_years = cfg.use_projection_years
 
 
 def _process_location(location_id, cfg: ProgramConfig, data: ProgramData):
@@ -233,11 +239,22 @@ def _process_location(location_id, cfg: ProgramConfig, data: ProgramData):
     _load_and_preprocess_location_data(location_id, cfg, data)
 
     for proj_year in data.projection_years:
-        _calculate_projection_priors(
+        # --- Select calibration samples from available years only
+        avail_samples_df = _calculate_projection_priors(
             location_id,
             proj_year,
             cfg, data
         )
+
+        # --- Combine with predicted outbreak features
+        _update_priors_with_outbreak_features(
+            location_id,
+            proj_year,
+            avail_samples_df=avail_samples_df,
+            cfg=cfg, data=data
+        )
+
+
 
     print(f"Processing {location_id=}")
 
@@ -247,14 +264,34 @@ def _load_and_preprocess_location_data(
 ):
     """"""
     _ptab = " -- "  # Tabulation of print messages
+
     data.calibration_years = calibration_years = apply_include_exclude_logic(
         all_series=pd.Series(cfg.use_calibration_years),
         exclude_list=cfg.exclude_years_by_location[location_id],
     )
 
+    # === Load observations (disease time series)
     data.observations_sr = observations_sr = (
         DiseaseTimeSeriesCache()  # Use default path and variable names
     ).get_location(location_id)
+
+    # === Load outbreak feature predictions
+    cache = OutbreakFeaturePredictionsCache(
+        main_dir=cfg.outbreak_features_predictions_dir,
+    )
+    for feature_name in cfg.use_outbreak_features:
+        # Note - This can be improved and streamlined once final shape is defined
+        df = cache.load_file(
+            cache.get_file_path(
+                location_id=location_id, feature_name=feature_name
+            )
+        )
+        cache.add_df_to_cache(
+            df,
+            feature_name=feature_name,
+        )
+
+    data.outb_feats_cache = cache
 
     # ==== Load data from all specified calibration years
     keys_list = list()
@@ -407,7 +444,7 @@ def _load_and_preprocess_location_data(
 
 def _calculate_projection_priors(
         location_id, proj_year, cfg: ProgramConfig, data: ProgramData
-):
+) -> pd.DataFrame:
     """ Prepare a prior distribution of model parameters combining
     all available calibration years before the projection year.
     """
@@ -424,24 +461,51 @@ def _calculate_projection_priors(
         pd.IndexSlice[calib_years, :], :
     ]
 
-    # --- [[Checkpoint save]]
-    out_dir = (
-        cfg.output_dir / "projections"
-        / cfg.location_year_subdir_fmt.format(
-            location_id=location_id, year=proj_year
-        )
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
-    avail_samples_df.to_csv(
-        out_dir / "multiyear_samples_for_projection.csv.gz",
-        index=True,
-        compression={
-            "method": "gzip",
-            "compresslevel": 9
-        }
-    )
+    return avail_samples_df
 
-    return
+
+def _update_priors_with_outbreak_features(
+        location_id,
+        proj_year,
+        avail_samples_df: pd.DataFrame,
+        cfg: ProgramConfig,
+        data: ProgramData,
+):
+    """Update the prior distribution of model parameters with outbreak
+    features predictions for the projection year.
+    """
+    _ptab = " -- "  # Tabulation of print messages
+
+
+    # Peak week
+    # ============
+    feature_name = "peak_week"
+    if feature_name in cfg.use_outbreak_features:
+        outb_feats_predicted_samples = (
+            data.outb_feats_cache.get_sample_series(
+                feature_name=feature_name,
+                location_id=location_id,
+                year=proj_year,
+            )
+        )
+
+        prediction_kde = (
+            gaussian_kde(
+                outb_feats_predicted_samples,
+            )
+        )
+
+        # # --- Would be great, but... not vectorizable :(
+        # prediction_kde.integrate_gaussian(
+        #     mean=each_prediction_mean,
+        #     cov=each_prediction_std**2,
+        # )
+        kde_evals = prediction_kde.evaluate(
+            avail_samples_df[feature_name]
+        )
+
+
+        pass
 
 if __name__ == "__main__":
     main(sys.argv[1:])
