@@ -123,25 +123,33 @@ def _size_samples(repo, asm, lab_idx, X_tr, X_ts, target, n_samples, rng):
 
 
 def _timing_samples(repo, year, t0, n_samples, rng):
-    """peak_timing_week samples per unit from SARIMAX stochastic trajectories (full season)."""
+    """peak_timing_week samples per unit from SARIMAX stochastic trajectories (full season).
+
+    Trajectories that simulate no epidemic (zero total incidence) have no meaningful peak, so
+    their week is resampled from the epidemic-bearing trajectories instead of defaulting to the
+    first week; a unit with no epidemic-bearing trajectory at all falls back to the point curve.
+    """
     panel = repo.panel()
     unit_col = repo.unit_col
-    weeks = season_epiweeks(year)
-    week_index = list(range(1, len(weeks) + 1))            # within-season indices, 1 = EW41
+    wk = np.arange(1, len(season_epiweeks(year)) + 1)      # within-season indices, 1 = EW41
     meta = {"target_season": year, "issue_epiweek": t0}
     sar = SarimaxModel(n_sims=n_samples)
     units, samples, n_fallback = [], [], 0
     for u, g in panel.groupby(unit_col):
         udf = _full_season_udf(g.sort_values("epiweek"), unit_col, u, year, t0)
-        curve = sar.predict_curve(udf, meta, week_index)
-        if sar.last_paths is not None:
-            paths = sar.last_paths                          # (n_sims, W)
-            peak = np.asarray(week_index)[np.nanargmax(paths, axis=1)].astype(float)
-        else:                                               # fallback: degenerate at the curve's peak
+        curve = sar.predict_curve(udf, meta, wk.tolist())
+        peak = np.full(n_samples, np.nan)
+        paths = sar.last_paths                              # (n_sims, W) or None
+        if paths is not None:
+            epi = np.nansum(paths, axis=1) > 0
+            if epi.any():
+                peak[epi] = wk[np.nanargmax(paths[epi], axis=1)]
+                if not epi.all():
+                    peak[~epi] = rng.choice(peak[epi], size=int((~epi).sum()))
+        if np.isnan(peak).any():                           # no epidemic-bearing trajectory
             n_fallback += 1
             arr = curve.to_numpy(float)
-            pk = float(week_index[int(np.nanargmax(arr))]) if np.nansum(arr) > 0 else np.nan
-            peak = np.full(n_samples, pk)
+            peak[np.isnan(peak)] = wk[int(np.nanargmax(arr))] if np.nansum(arr) > 0 else wk[0]
         units.append(u)
         samples.append(peak)
     return np.array(units), np.vstack(samples), n_fallback  # (units,), (units, n_samples)

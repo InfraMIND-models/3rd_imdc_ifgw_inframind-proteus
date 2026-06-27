@@ -7,9 +7,10 @@ counts and a `peak_week` relative to EW40. The conversions (see export_contract.
     peak_amplitude   = round(size_peak_incidence * population / 100_000) # cases in the peak week
     peak_week        = peak_timing_week                                  # identical (1 = EW41)
 
-Population is the UF population of the season **start year** (the same per-(unit, year) figure the
-incidence rates were built from, so the conversion round-trips). Counts are rounded to
-non-negative integers only at the very end (after sampling).
+Population is the UF population of the season **start year**. Most of a season's incidence falls
+in the following calendar year, whose population differs only marginally, so the start-year
+figure is a deliberate, near-exact approximation. Counts are rounded to non-negative integers
+only at the very end (after sampling).
 """
 from __future__ import annotations
 
@@ -34,9 +35,8 @@ def uf_acronyms() -> dict[int, str]:
 
 def start_year_population(repo: DataRepository) -> dict[tuple[int, int], float]:
     """(unit, year) -> UF population in that year (the season's start year)."""
-    panel = repo.panel()
-    pop = panel.groupby([repo.unit_col, "year"])["population"].first()
-    return {(int(u), int(y)): float(p) for (u, y), p in pop.items()}
+    return {(int(u), int(y)): float(p)
+            for (u, y), p in repo.population_by_unit_year().items()}
 
 
 def to_contract(samples: pd.DataFrame, repo: DataRepository) -> pd.DataFrame:
@@ -53,7 +53,6 @@ def to_contract(samples: pd.DataFrame, repo: DataRepository) -> pd.DataFrame:
 
     out = []
     for target, g in samples.groupby("target", sort=False):
-        g = g.copy()
         if target in SIZE_MAP:
             feature = SIZE_MAP[target]
             popv = np.array([pop.get((int(u), int(y)), np.nan)

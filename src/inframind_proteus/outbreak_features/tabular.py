@@ -79,7 +79,7 @@ class CatBoostModel(BaseModel):
         return self._to_natural(self.model_.predict(self._prep(X)))
 
     def predict_quantiles(self, X: pd.DataFrame, quantiles=None) -> pd.DataFrame:
-        quantiles = tuple(quantiles or self.quantiles)
+        quantiles = sorted(quantiles or self.quantiles)    # ascending: column labels align with sorted values
         if not self.qmodels_:
             raise NotImplementedError("model fitted with fit_quantiles=False")
         Xp = self._prep(X)

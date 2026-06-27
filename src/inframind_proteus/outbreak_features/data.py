@@ -70,6 +70,11 @@ class DataRepository:
             self._build_panel()
         return self._panel
 
+    def population_by_unit_year(self) -> pd.Series:
+        """(unit, year) -> population (one figure per calendar year)."""
+        panel = self.panel()
+        return panel.groupby([self.unit_col, "year"])["population"].first()
+
     # ---- folds -------------------------------------------------------------
     def folds(self) -> dict[int, dict]:
         """Decode the IMDC rolling-origin folds from the train_k/target_k flags."""

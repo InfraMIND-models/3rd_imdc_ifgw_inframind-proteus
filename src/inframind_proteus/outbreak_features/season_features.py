@@ -246,7 +246,7 @@ def build_season_features(repo: DataRepository,
         feat = feat.merge(src.rename(columns=ren), on=["unit", "season"], how="left")
 
     # ---- P5b/P5c: immunity proxies + pre-season activity (per-unit loop) ----
-    pop_uy = panel.groupby([unit_col, "year"])["population"].first()
+    pop_uy = repo.population_by_unit_year()
     panel_by_unit = {u: g.sort_values("epiweek") for u, g in panel.groupby(unit_col)}
     chik_by_unit = _chik_weekly(repo) if config.P5_INCLUDE_CHIK else {}
     lab_u = {u: g.sort_values("season") for u, g in labels.groupby("unit")}
