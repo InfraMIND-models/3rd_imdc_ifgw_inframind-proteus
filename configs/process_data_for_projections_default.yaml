@@ -4,5 +4,6 @@ use_projection_years: [2022, 2023]  # For testing
 exclude_years_by_location:
   ES: [2021,]  # 2021: Absent cases in data
 
-outbreak_features_predictions_dir: "outputs/outbreak_features_mockup"  # Use mockup dir for now
+#outbreak_features_predictions_dir: "outputs/outbreak_features_mockup"  # Use mockup dir
+outbreak_features_predictions_dir: "predictions"  # Use separate `predictions` dir for now
 use_outbreak_features: ["peak_week",]  # Just peak week for now.

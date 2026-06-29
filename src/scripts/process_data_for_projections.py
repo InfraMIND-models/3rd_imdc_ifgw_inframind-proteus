@@ -13,9 +13,12 @@ from pathlib import Path
 from typing import Union, Tuple, Any
 
 import pandas as pd
-from scipy.stats import gaussian_kde, norm as normal_distribution
+from scipy.stats import (
+    gaussian_kde, norm as normal_distribution, lognorm as lognormal_distribution
+)
 
 from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
+from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.outbreak_features import OutbreakFeaturePredictionsCache
 
 print("Importing libraries...")
@@ -61,10 +64,13 @@ class ProgramConfig(BaseConfig):
     `process_data_for_projections` script.
     """
     config_fpath: Path = Path("configs/process_data_for_projections_default.yaml")
-    base_sim_config_fpath: Path = Path("configs/simulation_config_default.yaml")
+    # base_sim_config_fpath: Path = Path("configs/simulation_config_default.yaml")
+    # # NOTE: This loads the defaults, which may have diverged from the actual simulation.
+    # # When possible, use a reconstructed config dict from the simulation outputs.
     calibrations_main_dir: Path = Path("outputs/validation_round_calibration")
     location_year_subdir_fmt: str = "{location_id}_{year}"
     outbreak_features_predictions_dir: Path = Path("outputs/validation_round_outbreak_features")
+    # outbreak_features_predictions_dir: Path = Path("predictions")
     output_dir: Path = Path("outputs/validation_round_projections")
 
     uf_table_fpath = Path("data/demographic/uf_table.csv")
@@ -114,9 +120,9 @@ class ProgramData:
     uf_table_df: pd.DataFrame
     # base_sim_config_dict: dict[str, Any]
     # base_sim_config: SimulationConfig
-    # Note: The sim config is a payload because it is not fully compatible with
-    #   the BaseConfig scheme, as it runs through a custom validation `from_dict()`.
-    #   If this gets fixed, one could override params through command line.
+    # # Note: The sim config is a payload because it is not fully compatible with
+    # #   the BaseConfig scheme, as it runs through a custom validation `from_dict()`.
+    # #   If this gets fixed, one could override params through command line.
 
     location_ids: list
     projection_years: list
@@ -127,6 +133,8 @@ class ProgramData:
     # Will only be loaded within the location process
     observations_sr: pd.Series
     outb_feats_cache: OutbreakFeaturePredictionsCache
+    calibration_config_dicts: dict[int, dict[str, Any]]
+    # Indexed by calibration year
     calibration_years: list[int]
     # param_samples_df: pd.DataFrame
     # max_likelihood_df: pd.DataFrame
@@ -235,8 +243,11 @@ def _load_global_data(cfg: ProgramConfig, data: ProgramData):
         include_list=cfg.use_location_ids,
         exclude_list=None,
     )
-
     data.projection_years = cfg.use_projection_years
+
+    # # --- Load base simulation config to retrieve parameters from
+    # data.base_sim_config_dict = load_yaml_dict(cfg.base_sim_config_fpath)
+    # data.base_sim_config = SimulationConfig.from_dict(data.base_sim_config_dict)
 
 
 def _process_location(location_id, cfg: ProgramConfig, data: ProgramData):
@@ -332,6 +343,14 @@ def _load_and_preprocess_location_data(
         print(f"{_ptab}Loading from {out_dir}...")
         keys_list.append(cal_year)
 
+        # --- Calibration configuration dictionary
+        data_lists["config_dict"].append(
+            load_yaml_dict(
+                out_dir / "calibration_program_config.yaml",
+                safe=False
+            )
+        )
+
         # --- Posterior parameter samples
         df = pd.read_csv(
             out_dir / "stage3_posterior_samples.csv.gz",
@@ -370,6 +389,12 @@ def _load_and_preprocess_location_data(
     # ----------
     if len(keys_list) == 0:
         raise ValueError("No data loaded. Check the output directories.")
+
+    # --- Configuration dictionaries
+    data.calibration_config_dicts = {
+        year: config_dict
+        for year, config_dict in zip(keys_list, data_lists["config_dict"])
+    }
 
     # --- Posterior samples
     param_samples_df = pd.concat(
@@ -483,6 +508,24 @@ def _calculate_projection_priors(
     return avail_samples_df
 
 
+def _get_and_check_zero_date_epiweek(
+        calibration_config_dicts
+):
+    """Fetch the reference date epiweek used for each year, and warn if they
+    are not the same among all years.
+    """
+    zero_epiweeks = [
+        cfg_dict["zero_date_epiweek"]
+        for cfg_dict in calibration_config_dicts.values()
+    ]
+    if len(set(zero_epiweeks)) > 1:
+        warnings.warn(
+            f"Different zero_date_epiweek values found among calibration years: "
+            f"{zero_epiweeks}. Using the first one."
+        )
+    return zero_epiweeks[0]
+
+
 def _calc_likelihood_of_outbreak_features(
         location_id,
         proj_year,
@@ -502,6 +545,7 @@ def _calc_likelihood_of_outbreak_features(
     # ============
     feature_name = "peak_week"
     if feature_name in cfg.use_outbreak_features:
+        # --- Fetch predicted samples
         outb_feats_predicted_samples = (
             data.outb_feats_cache.get_sample_series(
                 feature_name=feature_name,
@@ -509,6 +553,15 @@ def _calc_likelihood_of_outbreak_features(
                 year=proj_year,
             )
         )
+
+        # --- Adjust offset on reference week for peak week predictions
+        dyn_zero_epiweek = _get_and_check_zero_date_epiweek(
+            data.calibration_config_dicts
+        )
+        feat_zero_epiweek = data.outb_feats_cache.peak_ref_epiweek
+        if dyn_zero_epiweek - feat_zero_epiweek:
+            # Adjust on predictions
+            outb_feats_predicted_samples -= (dyn_zero_epiweek - feat_zero_epiweek)
 
         # # -()- KDE over the predicted samples
         # prediction_kde = (
@@ -520,10 +573,17 @@ def _calc_likelihood_of_outbreak_features(
         #     avail_samples_df[feature_name]
         # )
 
-        # -()- Simple Gaussian fit over all predicted samples
-        mean = outb_feats_predicted_samples.mean()
-        std = outb_feats_predicted_samples.std()
-        dist = normal_distribution(loc=mean, scale=std)
+        # # -()- Simple Gaussian fit over all predicted samples
+        # mean = outb_feats_predicted_samples.mean()
+        # std = outb_feats_predicted_samples.std()
+        # dist = normal_distribution(loc=mean, scale=std)
+        # pdf_evals = dist.pdf(avail_samples_df[feature_name])
+
+        # -()- Lognormal fit - Did better on statistical tests with all features
+        fit_params = lognormal_distribution.fit(
+            outb_feats_predicted_samples
+        )
+        dist = lognormal_distribution(*fit_params)
         pdf_evals = dist.pdf(avail_samples_df[feature_name])
 
 
