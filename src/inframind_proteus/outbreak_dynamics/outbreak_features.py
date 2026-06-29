@@ -119,7 +119,8 @@ class OutbreakFeaturePredictionsCache:
             main_dir: Union[str, Path] = (
                     Path("outputs/validation_round_outbreak_features")
             ),
-            fname_fmt: str = "{feature_name}_{location_id}.csv",
+            # fname_fmt: str = "{feature_name}_{location_id}.csv",  # -()- By feature and location
+            fname_fmt: str = "{feature_name}.csv",  # By feature only
     ):
         self.feature_names = feature_names or self.feature_names
         self.peak_ref_epiweek = peak_ref_epiweek
@@ -130,18 +131,6 @@ class OutbreakFeaturePredictionsCache:
         # --- Initialize an empty buffer for each feature
         # No index in cache, all variables are columns
         self._samples_by_feature = dict()
-
-        # # No empty initialization. Pandas discourages concatenating from empty dataframes.
-        # for feature_name in self.feature_names:
-        #     self._samples_by_feature[feature_name] = pd.DataFrame(
-        #         {},
-        #         columns=[
-        #             "location_id",
-        #             "year",
-        #             "i_sample",
-        #             feature_name,
-        #         ]
-        #     )
 
     def get_file_path(
             self, **kwargs

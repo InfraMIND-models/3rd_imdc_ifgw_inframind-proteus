@@ -10,25 +10,31 @@ import warnings
 from argparse import ArgumentParser
 from collections import defaultdict
 from pathlib import Path
-from typing import Union, Tuple, Any
+from typing import Union, Tuple, Any, Literal
 
 import pandas as pd
-from scipy.stats import gaussian_kde, norm as normal_distribution
+import matplotlib as mpl
+import matplotlib.ticker
+from matplotlib import pyplot as plt
+from scipy.stats import (
+    gaussian_kde, norm as normal_distribution, lognorm as lognormal_distribution
+)
 
 from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
+from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.outbreak_features import OutbreakFeaturePredictionsCache
 
 print("Importing libraries...")
 from inframind_proteus import BaseConfig
 from inframind_proteus.outbreak_dynamics.utils import load_yaml_dict, parse_set_arguments_with_yaml, add_set_argument, \
-    apply_include_exclude_logic, map_parallel_or_sequential
+    apply_include_exclude_logic, map_parallel_or_sequential, make_axes_seq, save_yaml_dict, make_yaml_exportable_dict
 
 
 def main(argv: Union[list[str], None] = None):
     """process_data_for_projections.py"""
-    cfg, data = _initialize_program(argv)
+    cfg, data = initialize_program(argv)
 
-    _load_global_data(cfg, data)
+    load_global_data(cfg, data)
 
     # --- Run location-specific logic in parallel
     def _task(location_id):
@@ -38,7 +44,7 @@ def main(argv: Union[list[str], None] = None):
         data elements to the function.
         """
         try:
-            _process_location(location_id, cfg, data)
+            process_location(location_id, cfg, data)
         except Exception as e:
             if cfg.raise_on_location_error:
                 raise e
@@ -61,10 +67,13 @@ class ProgramConfig(BaseConfig):
     `process_data_for_projections` script.
     """
     config_fpath: Path = Path("configs/process_data_for_projections_default.yaml")
-    base_sim_config_fpath: Path = Path("configs/simulation_config_default.yaml")
+    # base_sim_config_fpath: Path = Path("configs/simulation_config_default.yaml")
+    # # NOTE: This loads the defaults, which may have diverged from the actual simulation.
+    # # When possible, use a reconstructed config dict from the simulation outputs.
     calibrations_main_dir: Path = Path("outputs/validation_round_calibration")
     location_year_subdir_fmt: str = "{location_id}_{year}"
     outbreak_features_predictions_dir: Path = Path("outputs/validation_round_outbreak_features")
+    # outbreak_features_predictions_dir: Path = Path("predictions")
     output_dir: Path = Path("outputs/validation_round_projections")
 
     uf_table_fpath = Path("data/demographic/uf_table.csv")
@@ -88,7 +97,11 @@ class ProgramConfig(BaseConfig):
         lambda: list(),
     )
 
-    use_outbreak_features: list[str] = OutbreakFeaturePredictionsCache.feature_names
+    outbreak_feature_names: list[str] = OutbreakFeaturePredictionsCache.feature_names
+
+    outbreak_features_fit_model: Literal[
+        "kde", "normal", "lognormal"
+    ]  = "kde"
 
     ncpus: int = 1  # Parallelize only over locations.
 
@@ -114,9 +127,9 @@ class ProgramData:
     uf_table_df: pd.DataFrame
     # base_sim_config_dict: dict[str, Any]
     # base_sim_config: SimulationConfig
-    # Note: The sim config is a payload because it is not fully compatible with
-    #   the BaseConfig scheme, as it runs through a custom validation `from_dict()`.
-    #   If this gets fixed, one could override params through command line.
+    # # Note: The sim config is a payload because it is not fully compatible with
+    # #   the BaseConfig scheme, as it runs through a custom validation `from_dict()`.
+    # #   If this gets fixed, one could override params through command line.
 
     location_ids: list
     projection_years: list
@@ -127,6 +140,8 @@ class ProgramData:
     # Will only be loaded within the location process
     observations_sr: pd.Series
     outb_feats_cache: OutbreakFeaturePredictionsCache
+    calibration_config_dicts: dict[int, dict[str, Any]]
+    # Indexed by calibration year
     calibration_years: list[int]
     # param_samples_df: pd.DataFrame
     # max_likelihood_df: pd.DataFrame
@@ -209,7 +224,7 @@ def parse_args_get_dict(argv) -> dict:
     return args_dict
 
 
-def _initialize_program(argv) -> Tuple[ProgramConfig, ProgramData]:
+def initialize_program(argv) -> Tuple[ProgramConfig, ProgramData]:
     # --- Program initialization sequence
     args_dict = parse_args_get_dict(argv)
     cfg = ProgramConfig()
@@ -223,7 +238,7 @@ def _initialize_program(argv) -> Tuple[ProgramConfig, ProgramData]:
     return cfg, data
 
 
-def _load_global_data(cfg: ProgramConfig, data: ProgramData):
+def load_global_data(cfg: ProgramConfig, data: ProgramData):
     """Load global data that is not location/year specific."""
     # --- Load UF table
     uf_table = pd.read_csv(cfg.uf_table_fpath)
@@ -235,48 +250,14 @@ def _load_global_data(cfg: ProgramConfig, data: ProgramData):
         include_list=cfg.use_location_ids,
         exclude_list=None,
     )
-
     data.projection_years = cfg.use_projection_years
 
-
-def _process_location(location_id, cfg: ProgramConfig, data: ProgramData):
-    """"""
-    print(f"Processing {location_id=}")
-    _load_and_preprocess_location_data(location_id, cfg, data)
-
-    for proj_year in data.projection_years:
-        # --- Select calibration samples from available years only
-        avail_samples_df = _calculate_projection_priors(
-            location_id,
-            proj_year,
-            cfg, data
-        )
-
-        # --- Combine with predicted outbreak features
-        likelihood_sr = _calc_likelihood_of_outbreak_features(
-            location_id, proj_year,
-            avail_samples_df=avail_samples_df,
-            cfg=cfg, data=data
-        )
-
-        # --- Build posterior and obtain final samples
-        posterior_df = _calc_posterior_samples(
-            location_id, proj_year,
-            avail_samples_df=avail_samples_df,
-            likelihood_sr=likelihood_sr,
-            cfg=cfg, data=data
-        )
-
-        data.posterior_samples_df = posterior_df
-
-        # --- Export outputs of this iteration
-        _export_location_outputs(
-            location_id, proj_year,
-            cfg=cfg, data=data
-        )
+    # # --- Load base simulation config to retrieve parameters from
+    # data.base_sim_config_dict = load_yaml_dict(cfg.base_sim_config_fpath)
+    # data.base_sim_config = SimulationConfig.from_dict(data.base_sim_config_dict)
 
 
-def _load_and_preprocess_location_data(
+def load_and_preprocess_location_data(
         location_id, cfg: ProgramConfig, data: ProgramData
 ):
     """"""
@@ -297,7 +278,7 @@ def _load_and_preprocess_location_data(
     cache = OutbreakFeaturePredictionsCache(
         main_dir=cfg.outbreak_features_predictions_dir,
     )
-    for feature_name in cfg.use_outbreak_features:
+    for feature_name in cfg.outbreak_feature_names:
         # Note - This can be improved and streamlined once final shape is defined
         df = cache.load_file(
             cache.get_file_path(
@@ -329,8 +310,16 @@ def _load_and_preprocess_location_data(
                 f"{out_dir}"
             )
 
-        print(f"{_ptab}Loading from {out_dir}...")
+        # print(f"{_ptab}Loading from {out_dir}...")
         keys_list.append(cal_year)
+
+        # --- Calibration configuration dictionary
+        data_lists["config_dict"].append(
+            load_yaml_dict(
+                out_dir / "calibration_program_config.yaml",
+                safe=False
+            )
+        )
 
         # --- Posterior parameter samples
         df = pd.read_csv(
@@ -370,6 +359,12 @@ def _load_and_preprocess_location_data(
     # ----------
     if len(keys_list) == 0:
         raise ValueError("No data loaded. Check the output directories.")
+
+    # --- Configuration dictionaries
+    data.calibration_config_dicts = {
+        year: config_dict
+        for year, config_dict in zip(keys_list, data_lists["config_dict"])
+    }
 
     # --- Posterior samples
     param_samples_df = pd.concat(
@@ -461,6 +456,43 @@ def _load_and_preprocess_location_data(
         )
 
 
+def process_location(location_id, cfg: ProgramConfig, data: ProgramData):
+    """"""
+    print(f"Processing {location_id=}")
+    load_and_preprocess_location_data(location_id, cfg, data)
+
+    for proj_year in data.projection_years:
+        # --- Select calibration samples from available years only
+        avail_samples_df = _calculate_projection_priors(
+            location_id,
+            proj_year,
+            cfg, data
+        )
+
+        # --- Combine with predicted outbreak features
+        likelihood_sr = _calc_likelihood_of_outbreak_features(
+            location_id, proj_year,
+            avail_samples_df=avail_samples_df,
+            cfg=cfg, data=data
+        )
+
+        # --- Build posterior and obtain final samples
+        posterior_samples_df = _calc_posterior_samples(
+            location_id, proj_year,
+            avail_samples_df=avail_samples_df,
+            likelihood_sr=likelihood_sr,
+            cfg=cfg, data=data
+        )
+
+        data.posterior_samples_df = posterior_samples_df
+
+        # --- Export outputs of this iteration
+        _export_location_outputs(
+            location_id, proj_year,
+            cfg=cfg, data=data
+        )
+
+
 def _calculate_projection_priors(
         location_id, proj_year, cfg: ProgramConfig, data: ProgramData
 ) -> pd.DataFrame:
@@ -483,6 +515,64 @@ def _calculate_projection_priors(
     return avail_samples_df
 
 
+def _get_and_check_zero_date_epiweek(
+        calibration_config_dicts
+):
+    """Fetch the reference date epiweek used for each year, and warn if they
+    are not the same among all years.
+    """
+    zero_epiweeks = [
+        cfg_dict["zero_date_epiweek"]
+        for cfg_dict in calibration_config_dicts.values()
+    ]
+    if len(set(zero_epiweeks)) > 1:
+        warnings.warn(
+            f"Different zero_date_epiweek values found among calibration years: "
+            f"{zero_epiweeks}. Using the first one."
+        )
+    return zero_epiweeks[0]
+
+
+def _fit_and_eval_outbreak_features(
+        outb_feats_predicted_samples: pd.Series,  # Predictions
+        out_feats_avail_samples: pd.Series,  # Available samples to evaluate
+        model: Literal["kde", "normal", "lognormal"] = "kde",
+):
+    """Adjust predicted outbreak feature samples to a selected model, then
+    evaluate it on the available samples to obtain likelihoods.
+    """
+    # -()- KDE over the predicted samples
+    if model == "kde":
+        prediction_kde = (
+            gaussian_kde(
+                outb_feats_predicted_samples,
+            )
+        )
+        pdf_evals = prediction_kde.evaluate(
+            out_feats_avail_samples
+        )
+
+    # -()- Simple Gaussian fit over all predicted samples
+    elif model == "normal":
+        mean = outb_feats_predicted_samples.mean()
+        std = outb_feats_predicted_samples.std()
+        dist = normal_distribution(loc=mean, scale=std)
+        pdf_evals = dist.pdf(out_feats_avail_samples)
+
+    # -()- Lognormal fit - Did better on statistical tests with all features
+    elif model == "lognormal":
+        fit_params = lognormal_distribution.fit(
+            outb_feats_predicted_samples
+        )
+        dist = lognormal_distribution(*fit_params)
+        pdf_evals = dist.pdf(out_feats_avail_samples)
+
+    else:
+        raise ValueError(f"Unknown outbreak_features_fit_model: {model}")
+
+    return pdf_evals
+
+
 def _calc_likelihood_of_outbreak_features(
         location_id,
         proj_year,
@@ -498,10 +588,10 @@ def _calc_likelihood_of_outbreak_features(
     # Initialize a likelihood series
     likelihood_sr = pd.Series(1.0, index=avail_samples_df.index, name="likelihood")
 
-    # Peak week
+    # Main loop over outbreak features
     # ============
-    feature_name = "peak_week"
-    if feature_name in cfg.use_outbreak_features:
+    for feature_name in cfg.outbreak_feature_names:
+        # --- Fetch predicted samples
         outb_feats_predicted_samples = (
             data.outb_feats_cache.get_sample_series(
                 feature_name=feature_name,
@@ -510,27 +600,24 @@ def _calc_likelihood_of_outbreak_features(
             )
         )
 
-        # # -()- KDE over the predicted samples
-        # prediction_kde = (
-        #     gaussian_kde(
-        #         outb_feats_predicted_samples,
-        #     )
-        # )
-        # pdf_evals = prediction_kde.evaluate(
-        #     avail_samples_df[feature_name]
-        # )
+        # --- Adjust offset on reference week for peak week predictions
+        if feature_name in ["peak_week"]:
+            dyn_zero_epiweek = _get_and_check_zero_date_epiweek(
+                data.calibration_config_dicts
+            )
+            feat_zero_epiweek = data.outb_feats_cache.peak_ref_epiweek
+            if dyn_zero_epiweek - feat_zero_epiweek:
+                # Adjust on predictions
+                outb_feats_predicted_samples -= (dyn_zero_epiweek - feat_zero_epiweek)
 
-        # -()- Simple Gaussian fit over all predicted samples
-        mean = outb_feats_predicted_samples.mean()
-        std = outb_feats_predicted_samples.std()
-        dist = normal_distribution(loc=mean, scale=std)
-        pdf_evals = dist.pdf(avail_samples_df[feature_name])
-
+        # --- Evaluate calibration samples with predicted distributions
+        pdf_evals = _fit_and_eval_outbreak_features(
+            outb_feats_predicted_samples=outb_feats_predicted_samples,
+            out_feats_avail_samples=avail_samples_df[feature_name],
+            model=cfg.outbreak_features_fit_model,
+        )
 
         likelihood_sr *= pdf_evals
-
-        # TODO: other outbreak features
-
 
     return likelihood_sr
 
@@ -562,7 +649,7 @@ def _calc_posterior_samples(
     ).index
 
     # --- Construct the posterior samples DataFrame, with potentially relevant info
-    posterior_df = (
+    posterior_samples_df = (
         avail_samples_df
         .reindex(sampled_indices)
         .reset_index()
@@ -570,12 +657,192 @@ def _calc_posterior_samples(
         .rename(columns={"year": "calibration_year"})
     )
     # Optional: Keep weights used to sample (not to be reused!)
-    posterior_df["weight"] = posterior_weights.reindex(sampled_indices).values
+    posterior_samples_df["weight"] = posterior_weights.reindex(sampled_indices).values
 
-    posterior_df.index.name = "i_simulation"  # For projection simulations
+    posterior_samples_df.index.name = "i_simulation"  # For projection simulations
+
+    # Plots and diagnostics
+    # =====
+    _plot_bayesian_update(
+        cfg=cfg, data=data,
+        location_id=location_id,
+        proj_year=proj_year,
+        avail_samples_df=avail_samples_df,
+        likelihood_sr=likelihood_sr,
+        posterior_weights=posterior_weights,
+        posterior_samples_df=posterior_samples_df,
+    )
+
+    return posterior_samples_df
 
 
-    return posterior_df
+def _get_and_make_plots_dir(
+        main_out_dir: Path, subdir_fmt,
+        location_id, proj_year
+):
+    out_dir = main_out_dir / "process_data_diagnostics" / subdir_fmt.format(
+        location_id=location_id, year=proj_year
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
+def _plot_bayesian_update(
+        cfg: ProgramConfig, data: ProgramData,
+        location_id, proj_year,
+        avail_samples_df: pd.DataFrame,
+        likelihood_sr: pd.Series,
+        posterior_weights: pd.Series,
+        posterior_samples_df: pd.DataFrame
+):
+    plots_out_dir = _get_and_make_plots_dir(
+        main_out_dir=cfg.output_dir,
+        subdir_fmt=cfg.location_year_subdir_fmt,
+        location_id=location_id,
+        proj_year=proj_year,
+    )
+
+    parameter_update_names = [
+        "rt_logist_r_high",
+        "rt_logist_start",
+        "notif_nb_overdispersion",
+    ]
+
+    # Update on relevant distributions
+    # ================================
+    with plt.rc_context({
+        "hist.bins": 30,
+    }):
+        fig, axes = make_axes_seq(
+            num_axes=(
+                len(cfg.outbreak_feature_names)
+                + len(parameter_update_names)
+            ),
+        )
+        ax_count = 0
+
+        # Update on each outbreak feature
+        # -------------------------------
+        for i, feature_name in enumerate(cfg.outbreak_feature_names):
+            ax = axes[i]
+            ax_count += 1
+
+            # Prior distribution (calibrated parameters)
+            ax.hist(
+                avail_samples_df[feature_name],
+                weights=avail_samples_df["multiyear_weight"],
+                density=True,
+                alpha=0.5,
+                label='Prior',
+            )
+
+            # Distribution of predictions (likelihood)
+            _samples = data.outb_feats_cache.get_sample_series(
+                feature_name=feature_name,
+                location_id=location_id,
+                year=proj_year,
+            )
+            ax.hist(
+                _samples,
+                density=True,
+                alpha=0.5,
+                label='Predicted',
+            )
+
+            # Posterior distribution (after outbreak feature update)
+            ax.hist(
+                avail_samples_df[feature_name],
+                weights=posterior_weights,
+                density=True,
+                alpha=0.5,
+                label="Posterior"
+            )
+
+            ax.set_xlabel(feature_name)
+            ax.set_ylabel("Density")
+
+        # Update on selected parameters
+        # -------------------------------
+        for i, param_name in enumerate(parameter_update_names):
+            ax = axes[ax_count]
+            ax_count += 1
+
+            # Prior distribution (calibrated parameters)
+            ax.hist(
+                avail_samples_df[param_name],
+                weights=avail_samples_df["multiyear_weight"],
+                density=True,
+                alpha=0.5,
+                label='Prior',
+            )
+
+            # Posterior distribution (after outbreak feature update)
+            ax.hist(
+                avail_samples_df[param_name],
+                weights=posterior_weights,
+                density=True,
+                alpha=0.5,
+                label="Posterior"
+            )
+
+            ax.set_xlabel(param_name)
+            ax.set_ylabel("Density")
+
+        axes[0].legend()
+        fig.suptitle(f"Bayesian update: {location_id}")
+        fig.tight_layout()
+
+        fig.savefig(
+            plots_out_dir / "bayesian_update_features.pdf"
+        )
+
+    # Parameters sampled from posterior
+    # =================================
+    # Evaluate quality of the sampled parameters that go to projections
+    with plt.rc_context({
+        "hist.bins": 30,
+    }):
+        fig, axes = make_axes_seq(2)
+
+        # Distribution of calibration years
+        # ---------------------------------
+        ax = axes[0]
+        sr = posterior_samples_df["calibration_year"].value_counts(normalize=True).sort_index()
+        ax.bar(
+            sr.index, sr.values
+        )
+        ax.set_title("Calibration years")
+        ax.set_ylabel("Proportion")
+        ax.xaxis.set_major_locator(
+            mpl.ticker.MultipleLocator(2)
+        )
+        ax.xaxis.set_minor_locator(
+            mpl.ticker.MultipleLocator(1)
+        )
+
+        # General numbers
+        # ----------------
+        ax = axes[1]
+        txt = ""
+        _n_samples = posterior_samples_df.shape[0]
+        _n_dup = posterior_samples_df.duplicated().sum()
+        _weights = posterior_samples_df["weight"]
+        _dominance = (_weights**2).sum() / (_weights.sum()**2)
+
+        txt += f"Total samples: {_n_samples}\n"
+        txt += f"Duplicate samples: {_n_dup} ({_n_dup / _n_samples * 100:0.2f}%)\n"
+        # txt += f"Weight dominance: {_dominance:0.3e}\n"  # Revise relevance of this metric..
+
+        ax.text(0.1, 0.9, txt, va="top")
+
+        fig.tight_layout()
+
+
+        fig.savefig(
+            plots_out_dir / "posterior_samples_summary.pdf"
+        )
+
+    return
 
 
 def _export_location_outputs(
@@ -594,6 +861,14 @@ def _export_location_outputs(
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # --- Configuration
+    d = make_yaml_exportable_dict(
+        cfg.to_dict(), copy=True
+    )
+    save_yaml_dict(
+        d, out_dir / "process_data_for_projections_config.yaml",
+        # safe=False
+    )
 
     # --- Posterior parameter samples
     posterior_df = data.posterior_samples_df
