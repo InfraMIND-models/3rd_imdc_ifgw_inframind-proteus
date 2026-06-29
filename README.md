@@ -68,6 +68,9 @@ dvc pull
 
 These topics are required by the organization rules and will be filled over time during the sprint.
 
+> The model has two components. The **outbreak-features component** (statistical macro-feature predictions per UF/year) documents all of the required-information topics below in its own
+> README: [`src/inframind_proteus/outbreak_features/README.md`](src/inframind_proteus/outbreak_features/README.md).
+
 1. Team and Contributors
 
     Name of your team.

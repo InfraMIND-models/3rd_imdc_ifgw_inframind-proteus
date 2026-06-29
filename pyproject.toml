@@ -26,6 +26,9 @@ dependencies = [
     "numba>=0.63.1",
     "pathos>=0.3.5",
     "pyarrow>=23.0.0",
+    # Outbreak-features component (statistical macro-feature models)
+    "catboost>=1.2.7",
+    "torch>=2.6.0",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +38,17 @@ dev = [
 [project.scripts]
 calibrate-3rd-imdc = "scripts.calibrate_3rd_imdc.main:main"
 calc-outbreak-features-from-posteriors = "scripts.calc_outbreak_features_from_posteriors:main"
+run-outbreak-features = "scripts.run_outbreak_features:main"
 
+
+# Pull the CPU-only PyTorch wheel (no CUDA) for the outbreak-features models.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]

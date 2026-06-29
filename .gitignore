@@ -216,3 +216,5 @@ outputs/*
 !outputs/README.md
 
 .tmp
+
+catboost_info/
