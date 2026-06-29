@@ -27,7 +27,7 @@ from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.utils import (
     parse_set_arguments_with_yaml, load_yaml_dict, year_week_to_date,
-    apply_include_exclude_logic, map_parallel_or_sequential, make_yaml_exportable_dict, save_yaml_dict
+    apply_include_exclude_logic, map_parallel_or_sequential, make_yaml_exportable_dict, save_yaml_dict, add_set_argument
 )
 from scripts.calibrate_3rd_imdc.program_config import ProgramConfig
 from scripts.calibrate_3rd_imdc.calibration_stage_1 import (
@@ -61,18 +61,22 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
         help="Path to the output directory.",
     )
 
-    # --- Generic nested `--set` argument.
     parser.add_argument(
-        "--set",
-        nargs=2,
+        "--use-location-ids",  "-l",
+        default=None,
+        type=str,
         action="append",
-        default=list(),
-        metavar=("KEY", "VALUE"),
-        help="Set a configuration parameter using dot notation (e.g. "
-             "--set stage1.num_simulations 4096)."
-             " Can be used multiple times.",
+        help=(
+            "List of location IDs to process. Can be specified multiple times. "
+            "Using this argument resets the default list from the program or "
+            "config file. Example: \"-l SP -l MG\" will set use_location_ids to "
+            "['SP', 'MG'], regardless of what other locations have been specified"
+            "on the defaults."
+        ),
     )
 
+    # --- Generic nested `--set` argument.
+    add_set_argument(parser)
 
     # ======
 

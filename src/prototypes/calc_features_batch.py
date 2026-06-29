@@ -1,38 +1,55 @@
 import glob
 import os
+import time
 from pathlib import Path
 
 from inframind_proteus.outbreak_dynamics.utils import map_parallel_or_sequential
 
 
 def main():
-    # main_out_dir = Path("outputs/validation_round_calibration")
-    main_out_dir = Path(".local/mind-runner_local/validation_round_calibration")
+    xt0 = time.time()
+    main_out_dir = Path("outputs/validation_round_calibration")
+    # main_out_dir = Path(".local/mind-runner_local/validation_round_calibration")
 
     # --- Regex
-    # Try to extract year from output_dir name using the location-year format.
-    # fmt = "{location_id}_{year}"
-    # # Create a regex pattern from the format string.
-    # pattern = fmt.replace("{location_id}", r"(?P<location_id>.+)")
-    # pattern = pattern.replace("{year}", r"(?P<year>\d{4})")
-    # # match = re.match(pattern, self.output_dir.name)
-    #
-    # pattern = "*_*"
-    pattern = "??_[0-9][0-9][0-9][0-9]"  # More explicit
-    subdirs = glob.glob(str(main_out_dir / pattern))
+    pattern = "??_[0-9][0-9][0-9][0-9]"
+    subdirs = list(glob.glob(str(main_out_dir / pattern)))
+    subdirs.sort()
 
+    # -()- Call to main() approach
+    # ============================
+    from scripts.calc_outbreak_features_from_posteriors import main as program_main
 
     def _task(subdir):
-        cmd = "uv run calc-outbreak-features-from-posteriors"
-        cmd += f" -o {subdir}"
-        os.system(cmd)
-        return subdir
-
-    _contents = subdirs
+        program_argv = f"-o {subdir}".split(" ")
+        program_main(program_argv)
+    _contents  = list(subdirs)[:]
 
     map_parallel_or_sequential(
-        _task, _contents, ncpus=6
+        _task, _contents, ncpus=8
     )
+
+    #
+    # # -()- Multiple program calls approach
+    # # ====================================
+    # def _task(subdir):
+    #     cmd = "uv run calc-outbreak-features-from-posteriors"
+    #     cmd += f" -o {subdir}"
+    #     os.system(cmd)
+    #     return subdir
+    #
+    # # _contents = subdirs[:12] # Limit to first 12 subdirs for testing
+    # _contents = subdirs
+    #
+    # map_parallel_or_sequential(
+    #     _task, _contents, ncpus=6
+    # )
+
+    # =========
+
+    xtf = time.time()
+
+    print(f" === Total time taken: {xtf - xt0:.2f} seconds ===")
 
 
 if __name__ == "__main__":

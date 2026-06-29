@@ -5,7 +5,6 @@ Mainly designed to calculate outbreak features after `calibrate-3rd-imdc`
 has been run.
 
 """
-
 import argparse
 import re
 import sys
@@ -53,7 +52,7 @@ class ProgramConfig(BaseConfig):
     #  ^ Define which features should be calculated.
 
     # --- Temporal config, epiweek-based (year-agnostic)
-    calculation_start_epiweek: int = 41
+    calculation_start_epiweek: int = 26
     calculation_end_epiweek: int = 40  # Of the next year
     end_in_next_year: bool = True  # Whether the calculation end epiweek is in the next year (e.g. 40 of the next year)
 
@@ -198,7 +197,6 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
 
 
 def main(argv: Union[list[str], None] = None) -> None:
-    pass
 
     # --- Program initialization sequence
     args_dict = parse_args_get_dict(argv)

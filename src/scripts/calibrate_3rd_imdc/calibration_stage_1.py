@@ -119,6 +119,8 @@ def _calc_scaling_from_presim_period(
         sim_cfg: SimulationConfig,
         observations_sr: pd.Series,
         presim_period_num_points,
+        force_nonzero=True
+
 ):
     # --- Fetch incidence at pre-simulation phase
     _n = presim_period_num_points
@@ -136,6 +138,9 @@ def _calc_scaling_from_presim_period(
         .loc[presim_start_date:presim_end_date]
     )
 
+    presim_mean = presim_obs_sr.mean()
+    presim_std = presim_obs_sr.std()
+
     # Calculate the relative scaling factor to match average recent observations
     # OBS: Could directly calculate the scaling factor, but it's less interpretable and harder to bound.
     # Assumes initialization with method "ones" (infections = 1)
@@ -145,9 +150,19 @@ def _calc_scaling_from_presim_period(
             / 1.
     )
 
+    # Regularize small case counts to avoid zero mean and std
+    if force_nonzero:
+        # Minimum: At least one case in the pre-simulation period
+        thresh = 1. / presim_obs_sr.shape[0]
+        if presim_mean < thresh:
+            presim_mean = thresh
+        if presim_std < thresh:
+            # Set also STD to avoid a collapsed gamma prior
+            presim_std = thresh
+
     # Observation series at the pre-sampling window
-    mean_rel_scaling = presim_obs_sr.mean() * coef
-    std_rel_scaling = presim_obs_sr.std() * coef
+    mean_rel_scaling = presim_mean * coef
+    std_rel_scaling = presim_std * coef
 
     return mean_rel_scaling, std_rel_scaling
 
