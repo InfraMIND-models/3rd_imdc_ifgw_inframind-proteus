@@ -309,13 +309,12 @@ class SimulationOutput:
             A new instance with concatenated data frames and arrays.
         """
         rt_dfs = [o.rt_df for o in objs if o.rt_df is not None]
+        scoring_objs = [o.scoring for o in objs if o.scoring is not None]
         return cls(
             infec_df=pd.concat([o.infec_df for o in objs], axis=0),
             mean_cases_df=pd.concat([o.mean_cases_df for o in objs], axis=0),
             case_beam_df=pd.concat([o.case_beam_df for o in objs], axis=0),
-            scoring=SimulationScoring.concat(
-                [o.scoring for o in objs if o.scoring is not None]
-            ),
+            scoring=SimulationScoring.concat(scoring_objs) if scoring_objs else None,
             rt_df=pd.concat(rt_dfs, axis=0) if rt_dfs else None,
             config=objs[0].config,  # Assumes all outputs share the same config
         )
