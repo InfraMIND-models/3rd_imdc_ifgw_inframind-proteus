@@ -646,6 +646,7 @@ class RenewalSimulator:
     def build_simulation_data(
             self,
             config: SimulationConfig = None,
+            sampling_kwargs: dict | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Build auxiliary data frames for simulations.
 
@@ -654,10 +655,11 @@ class RenewalSimulator:
         """
         # ---
         config = config or self.config
+        sampling_kwargs = sampling_kwargs or dict()
 
         # Data frame with all model parameters
         params_df = build_calibration_params_df(
-            config.num_simulations, config.sampling
+            config.num_simulations, config.sampling, **sampling_kwargs
         )
         # Re-assign num_simulations, since prev. step may change it
         config.num_simulations = params_df.shape[0]
@@ -1118,6 +1120,54 @@ class RenewalSimulator:
 
         return cls(rt_model=rt_model, gt_model=gt_model, config=config)
 
+
+def sample_negative_binomial_trajectories(
+        expectancy: np.ndarray,
+        overdisp: np.ndarray,
+        rng: np.random.Generator,
+) -> np.ndarray:
+    """Apply the negative-binomial observation model to infection counts.
+
+    This samples actual numbers of cases for each time and each abstract
+    infection trajectory, rather than specifying prediction intervals.
+
+    Parameters
+    ----------
+    expectancy: np.ndarray
+        Expected number of cases (mean of the negative binomial) at each
+        time (column index) for each trajectory (row index).
+        Expected shape: (num_simulations, num_time_steps).
+    overdisp: np.ndarray
+        Overdispersion parameter of the negative binomial for each trajectory.
+        Expected shape: (num_simulations,).
+    rng: np.random.Generator
+        A pre-initialized NumPy random generator, or data to initialize it.
+    """
+    # Prep work
+    # ---------
+    # -()- Strict shape checks. Could be made more flexible (e.g. array and scalar)
+    if expectancy.ndim != 2:
+        raise ValueError(f"expectancy must be 2D; got shape {expectancy.shape}")
+    if overdisp.ndim != 1:
+        raise ValueError(f"overdisp must be 1D; got shape {overdisp.shape}")
+    if expectancy.shape[0] != overdisp.shape[0]:
+        raise ValueError(
+            f"expectancy.shape[0] ({expectancy.shape[0]}) must match "
+            f"overdisp.shape[0] ({overdisp.shape[0]})"
+        )
+
+    rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
+
+    # -------
+    _expectancy = expectancy
+    _overdisp = overdisp[:, np.newaxis]
+    p = _overdisp / (_overdisp + _expectancy)
+
+    cases_vec: np.ndarray = rng.negative_binomial(
+        n=_overdisp, p=p, size=_expectancy.shape
+    )
+
+    return cases_vec
 
 _nb_readonly_arr = nb.types.Array(nb.types.float64, 2, 'A', readonly=True)
 @nb.njit(

@@ -558,7 +558,10 @@ def build_calibration_params_df(
     # Combine fixed and sampled
     if fixed_params:
         params_df = pd.DataFrame(
-            {name: np.full(num_simulations, value, dtype=float) for name, value in fixed_params.items()}
+            {
+                name: np.full(num_simulations, value, dtype=float)
+                for name, value in fixed_params.items()
+            }
         )
     else:
         params_df = pd.DataFrame(index=np.arange(num_simulations))

@@ -40,6 +40,7 @@ calibrate-3rd-imdc = "scripts.calibrate_3rd_imdc.main:main"
 calc-outbreak-features-from-posteriors = "scripts.calc_outbreak_features_from_posteriors:main"
 process-data-for-projections = "scripts.process_data_for_projections:main"
 run-outbreak-features = "scripts.run_outbreak_features:main"
+project-3rd-imdc = "scripts.project_3rd_imdc:main"
 
 
 # Pull the CPU-only PyTorch wheel (no CUDA) for the outbreak-features models.

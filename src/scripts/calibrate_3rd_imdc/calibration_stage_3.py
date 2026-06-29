@@ -289,7 +289,17 @@ def _postprocess_stage_3_simulations(
         random_state=rng,
     )
 
+    # FUTURE IMPROVE: Use `sim_results.infec_df` instead and call a simulator internal method
+    # to apply the observation model agnostically instead of a standalone negative binomial
     re_sample_mean_cases = sim_results.mean_cases_df.reindex(re_sample_params.index)
+
+    # Before this is improved, we can just double-check that the observation
+    # model is negative binomial
+    if simulator.config.observation_model.model != "negative_binomial":
+        raise ValueError(
+            "The observation model is not negative binomial. "
+            "This procedure is currently hardcoded for that model only."
+        )
 
     # After identifying original simulations, reset the indexes to sequential
     for obj in [re_sample_params, re_sample_mean_cases]:

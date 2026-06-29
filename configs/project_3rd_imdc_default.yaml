@@ -1,0 +1,4 @@
+# -()- For quick tests
+use_location_ids: ["AC", "SP"]
+use_years: [2022, 2025]
+ncpus: 1
