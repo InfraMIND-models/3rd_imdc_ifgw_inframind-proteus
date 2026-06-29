@@ -27,7 +27,7 @@ from inframind_proteus.outbreak_dynamics.outbreak_features import OutbreakFeatur
 print("Importing libraries...")
 from inframind_proteus import BaseConfig
 from inframind_proteus.outbreak_dynamics.utils import load_yaml_dict, parse_set_arguments_with_yaml, add_set_argument, \
-    apply_include_exclude_logic, map_parallel_or_sequential, make_axes_seq
+    apply_include_exclude_logic, map_parallel_or_sequential, make_axes_seq, save_yaml_dict, make_yaml_exportable_dict
 
 
 def main(argv: Union[list[str], None] = None):
@@ -861,6 +861,14 @@ def _export_location_outputs(
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # --- Configuration
+    d = make_yaml_exportable_dict(
+        cfg.to_dict(), copy=True
+    )
+    save_yaml_dict(
+        d, out_dir / "process_data_for_projections_config.yaml",
+        # safe=False
+    )
 
     # --- Posterior parameter samples
     posterior_df = data.posterior_samples_df
