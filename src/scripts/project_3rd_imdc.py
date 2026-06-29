@@ -320,14 +320,6 @@ def run_projections_for_location_year(
         columns=sim_results.mean_cases_df.columns,
     )
 
-    # Just check it
-    fig, ax = plt.subplots()
-    ax.plot(
-        cases_df.T,
-        alpha=0.1,
-        color="blue",
-    )
-    fig.show()
 
     return
 

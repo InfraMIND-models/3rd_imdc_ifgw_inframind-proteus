@@ -10,6 +10,7 @@ from scipy.stats import gaussian_kde
 
 from inframind_proteus.outbreak_dynamics import RenewalSimulator, SimulationConfig, SimulationOutput
 from inframind_proteus.outbreak_dynamics.sampling import GammaPrior
+from inframind_proteus.outbreak_dynamics.simulator import sample_negative_binomial_trajectories
 from inframind_proteus.outbreak_dynamics.utils import make_yaml_exportable_dict, save_yaml_dict
 from .calibration_stage_1 import Stage1Outputs
 from .calibration_stage_2 import Stage2Outputs
@@ -306,19 +307,17 @@ def _postprocess_stage_3_simulations(
         obj.reset_index(drop=True, inplace=True)
         obj.index.name = "i_sample"
 
-    # --- Reshape to 2D arrays and sample everything at once
-    # Standard shape: (i_sample, i_time)
-    _expectancy = re_sample_mean_cases.values
-    _overdisp = re_sample_params["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
-    p = _overdisp / (_overdisp + _expectancy)
-
-    cases_vec: np.ndarray = rng.negative_binomial(
-        n=_overdisp, p=p, size=_expectancy.shape
+    cases_vec = (
+        sample_negative_binomial_trajectories(
+            expectancy=re_sample_mean_cases.to_numpy(),
+            overdisp=re_sample_params["notif_nb_overdispersion"].to_numpy(),
+            rng=rng
+        )
     )
     cases_df = pd.DataFrame(
         cases_vec,
-        index=re_sample_params.index,
-        columns=re_sample_mean_cases.columns
+        index=re_sample_mean_cases.index,
+        columns=re_sample_mean_cases.columns,
     )
 
     return post_samples_df, post_kde, cases_df

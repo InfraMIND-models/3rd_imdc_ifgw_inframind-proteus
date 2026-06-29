@@ -79,8 +79,8 @@ class ProgramConfig(BaseConfig):
 
     # --- Locations and years to run
     # use_location_ids = ["SP", "SE", "MG", "PA"]  # Runs all!
-    use_location_ids: list[str] = ["MG"]
-    # use_location_ids = []  # Runs all!
+    # use_location_ids: list[str] = ["MG"]
+    use_location_ids = []  # Runs all!
     exclude_location_ids: list[str] = list()
     use_years = list(range(2022, 2023))
     # use_years = list(range(2016, 2023))

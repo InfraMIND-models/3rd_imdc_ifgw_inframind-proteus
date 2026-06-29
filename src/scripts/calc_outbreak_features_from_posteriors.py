@@ -20,6 +20,7 @@ from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.outbreak_features import outbreak_features_from_trajectories, \
     outbreak_feature_stats
+from inframind_proteus.outbreak_dynamics.simulator import sample_negative_binomial_trajectories
 # from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics.utils import load_yaml_dict, parse_set_arguments_with_yaml, year_week_to_date
 
@@ -354,23 +355,28 @@ def _apply_stochastic_observation_model(
     augm_mean_cases_df = data.augm_mean_cases_df
     augm_param_samples_df = data.augm_param_samples_df
 
-    # Apply the 2D reshaping to sample trajectories with vectorized numpy
+    # Apply the negative binomial observation model
     # =======================
-    # Standard shape: (i_augmented_sample, i_time)
-    _expectancy = augm_mean_cases_df.values
-    _overdisp = augm_param_samples_df["notif_nb_overdispersion"].to_numpy()[:, np.newaxis]
-    p = _overdisp / (_overdisp + _expectancy)
+    # FUTURE IMPROVE: Use `sim_results.infec_df` instead and call a simulator internal method
+    # to apply the observation model agnostically instead of a standalone negative binomial
+    if data.sim_cfg.observation_model.model != "negative_binomial":
+        raise ValueError(
+            "The observation model is not negative binomial. "
+            "This procedure is currently hardcoded for that model only."
+        )
 
-    # Sample with negative binomial (observation model)
-    # ============================
     rng = np.random.default_rng(seed=cfg.observation_model_seed)
-    cases_vec: np.ndarray = rng.negative_binomial(
-        n=_overdisp, p=p, size=_expectancy.shape
+    cases_vec = (
+        sample_negative_binomial_trajectories(
+            expectancy=augm_mean_cases_df.to_numpy(),
+            overdisp=augm_param_samples_df["notif_nb_overdispersion"].to_numpy(),
+            rng=rng
+        )
     )
     cases_df = pd.DataFrame(
         cases_vec,
         index=augm_mean_cases_df.index,
-        columns=augm_mean_cases_df.columns
+        columns=augm_mean_cases_df.columns,
     )
 
     return cases_df
