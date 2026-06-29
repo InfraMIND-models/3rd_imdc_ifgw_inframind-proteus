@@ -137,6 +137,10 @@ def make_yaml_exportable_dict(
 
     d = deepcopy(data) if copy else data
 
+    # Convert top-level defaultdict/OrderedDict to regular dict
+    if isinstance(d, (OrderedDict, defaultdict)):
+        d = dict(d)
+
     for key, val in d.items():
 
         # Ordered and default dict
