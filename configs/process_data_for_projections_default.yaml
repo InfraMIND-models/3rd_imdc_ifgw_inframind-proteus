@@ -1,6 +1,13 @@
 
-use_location_ids: ["SP", "ES"]
-use_projection_years: [2022, 2023]  # For testing
+## -()- For testing
+#use_location_ids: ["SP", "ES"]
+#use_projection_years: [2022, 2023]  # For testing
+
+# -()- Full run
+use_location_ids: []
+use_projection_years: [2022, 2023, 2024, 2025]
+ncpus: 4
+
 exclude_years_by_location:
   ES: [2021,]  # 2021: Absent cases in data
 
