@@ -2,31 +2,33 @@
 # SimulationConfig dictionary to serve as template for simulation calls.
 #base_sim_config_fpath: "configs/simulation_config_default.yaml"
 
-# -()- Full run
-use_location_ids: []  # Run all!
+## -()- Full run
+#use_location_ids: []  # Run all!
+#use_years: [
+#  2010, 2011, 2012, 2013, 2014, 2015, 2016,
+#  2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024
+#]
+#ncpus: 12
+#stage1:
+#    num_simulations: 1048576  # 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
+#stage2:
+#    num_simulations: 1048576
+#stage3:
+#    num_simulations: 262144
+
+
+# -()- Quick test runs
+use_location_ids: ["AC", "SP"]
 use_years: [
+#  2020, 2021, 2022
   2010, 2011, 2012, 2013, 2014, 2015, 2016,
   2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024
 ]
-ncpus: 12
 stage1:
-    num_simulations: 1048576  # 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
+    num_simulations: 1048576
 stage2:
     num_simulations: 1048576
 stage3:
     num_simulations: 262144
-
-
-## -()- Quick test runs
-#use_location_ids: ["AC", "SP"]  # Run all!
-#use_years: [
-#  2020, 2021, 2022
-#]
-#stage1:
-#    num_simulations: 262144  # 2**10 = 1024
-#stage2:
-#    num_simulations: 262144
-#stage3:
-#    num_simulations: 262144
-#ncpus: 2
-#output_dir: "outputs/quick_test_runs/calibrations"
+ncpus: 3
+output_dir: "outputs/quick_test_runs/calibrations"
