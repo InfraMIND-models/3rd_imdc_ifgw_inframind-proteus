@@ -420,7 +420,7 @@ class RenewalSimulator:
             ``notif_relative_scale`` column for relative scaling.
         initial_infec_df:
             Seed infection values for the warm-up window.
-            Shape ``(num_simulations, gt_max_steps)``.
+            Shape ``(num_simulations, warmup_steps)``.
         observations_sr:
             Observed case counts indexed by time step.  Required in
             calibration mode; ignored in projection mode.
@@ -434,6 +434,7 @@ class RenewalSimulator:
         num_sim = params_df.shape[0]  # Infer from params_df
         num_steps = cfg.num_time_steps
         gt_steps = self._gt_max_steps
+        warmup_steps = initial_infec_df.shape[1]
         step_dt = self._step_dt
 
         # ------------------------------------------------------------------
@@ -448,11 +449,17 @@ class RenewalSimulator:
         #         "Number of rows in `params_df` does not match "
         #         "config.num_simulations. Will run the number on params_df."
         #     )
-        if initial_infec_df.shape != (num_sim, gt_steps):
+        if initial_infec_df.shape[0] != num_sim:
             raise ValueError(
-                f"initial_infec_df must have shape ({num_sim}, {gt_steps}); "
-                f"got {initial_infec_df.shape}"
+                f"initial_infec_df has {initial_infec_df.shape[0]} rows; "
+                f"expected {num_sim}"
             )
+        if initial_infec_df.shape[1] < gt_steps:
+            raise ValueError(
+                f"initial_infec_df must have at least {gt_steps} columns; "
+                f"got {initial_infec_df.shape[1]}"
+            )
+
         # if not params_df.index.isin(initial_infec_df.index).all():  # contains
         if not (initial_infec_df.index == params_df.index).all():  # exact match
             raise ValueError(
@@ -530,7 +537,7 @@ class RenewalSimulator:
         # 6. Observation model (crop warm-up first)
         # ------------------------------------------------------------------
         rng = np.random.default_rng(cfg.rng_seed)
-        infec_sim = infec_vec[:, gt_steps:]  # (num_sim, num_steps)
+        infec_sim = infec_vec[:, warmup_steps:]  # (num_sim, num_steps)
 
         mean_cases_vec, case_beam_df = self._apply_observation_model(
         # case_beam_df = self._apply_observation_model(
