@@ -30,22 +30,6 @@ def main():
         _task, _contents, ncpus=8
     )
 
-    #
-    # # -()- Multiple program calls approach
-    # # ====================================
-    # def _task(subdir):
-    #     cmd = "uv run calc-outbreak-features-from-posteriors"
-    #     cmd += f" -o {subdir}"
-    #     os.system(cmd)
-    #     return subdir
-    #
-    # # _contents = subdirs[:12] # Limit to first 12 subdirs for testing
-    # _contents = subdirs
-    #
-    # map_parallel_or_sequential(
-    #     _task, _contents, ncpus=6
-    # )
-
     # =========
 
     xtf = time.time()

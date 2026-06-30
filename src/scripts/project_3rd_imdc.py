@@ -372,11 +372,44 @@ def run_projections_for_location_year(
         full_pi_df[lower_col] = cases_df.quantile(q=(1. - level) / 2, axis=0)
         full_pi_df[upper_col] = cases_df.quantile(q=1. - (1. - level) / 2, axis=0)
 
-    # and prepare a submission-ready data frame
+    # Prepare and export submission-ready DataFrame
+    # ===========
+    df: pd.DataFrame = full_pi_df.copy()
+    df.index.name = "date"
 
     # --- Temporal
-    subm_start_date = year_week_to_date(year, cfg.imdc_projection_epiweek_start).date()
-    subm_end_date = year_week_to_date(year + 1, cfg.imdc_projection_epiweek_end).date()
+    subm_start_date = (
+        year_week_to_date(year, cfg.imdc_projection_epiweek_start).date()
+    )
+    subm_end_date = (
+        year_week_to_date(year + 1, cfg.imdc_projection_epiweek_end).date()
+    )
+    # Crop submission period
+    df = df.loc[subm_start_date:subm_end_date]
+
+    # Validate  - TODO
+    # # - - - Check epiweek alignment
+    # import epiweeks
+    # print(epiweeks.Week.fromdate(df.index.max()).week)
+    # print(epiweeks.Week.fromdate(df.index.min()).week)
+
+    imdc_submission_pi_df = df
+
+    # Export data
+    # ================
+
+    # --- Config to YAML
+    d = cfg.to_dict()
+    d = make_yaml_exportable_dict(d, copy=True)
+    fpath = out_dir / "projections_program_config.yaml"
+    save_yaml_dict(d, fpath, safe=True)
+    print(f"\tExported program config: {fpath}")
+
+    # --- Submission-ready DataFrame to CSV
+    fpath = out_dir / "imdc_submission.csv"
+    imdc_submission_pi_df.to_csv(fpath, index=True)
+    print(f"\tExported IMDC submission-ready DataFrame: {fpath}")
+
 
     # ----
     nrows = 2

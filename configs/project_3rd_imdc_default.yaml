@@ -7,7 +7,7 @@
 # -()- Full runs
 use_location_ids: []
 use_projection_years: [2022, 2023, 2024, 2025]
-ncpus: 6
+ncpus: 12
 
 ## -()- Sensitivity: No update from outbreak features
 #use_location_ids: []

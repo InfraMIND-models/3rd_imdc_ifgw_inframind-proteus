@@ -3,12 +3,13 @@
 #use_location_ids: ["AC", "SP"]
 #use_projection_years: [2022, 2023]  # For testing
 #ncpus: 1
+#calibrations_main_dir: "outputs/quick_test_runs/calibrations"  # -()- Take from quick test as well
 #output_dir: "outputs/quick_test_runs"
 
 # -()- Full run
 use_location_ids: []
 use_projection_years: [2022, 2023, 2024, 2025]
-ncpus: 4
+ncpus: 8
 
 
 ## -()- Sensitivity: No update from outbreak features
