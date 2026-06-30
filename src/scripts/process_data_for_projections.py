@@ -831,14 +831,15 @@ def _plot_bayesian_update(
         txt = ""
         _n_samples = posterior_samples_df.shape[0]
         _n_dup = posterior_samples_df.duplicated().sum()
-        _weights = posterior_samples_df["weight"]
+        # _weights = posterior_samples_df["weight"]
+        _weights = posterior_weights  # All weights, not just sampled ones
         _dominance = (_weights**2).sum() / (_weights.sum()**2)
 
         txt += f"Total samples: {_n_samples}\n"
         txt += f"Duplicate samples: {_n_dup} ({_n_dup / _n_samples * 100:0.2f}%)\n"
-        # txt += f"Weight dominance: {_dominance:0.3e}\n"  # Revise relevance of this metric..
+        txt += f"Weight dominance: {_dominance:0.3e}\n"
 
-        ax.text(0.1, 0.9, txt, va="top")
+        ax.text(0.05, 0.9, txt, va="top")
 
         fig.tight_layout()
 

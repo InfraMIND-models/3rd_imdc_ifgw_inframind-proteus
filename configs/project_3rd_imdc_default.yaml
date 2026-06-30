@@ -1,7 +1,8 @@
-## -()- For quick tests
+# # -()- Quick test runs
 #use_location_ids: ["AC", "SP"]
-#use_projection_years: [2022, 2025]
+#use_projection_years: [2022, 2023]
 #ncpus: 1
+#output_dir: "outputs/quick_test_runs"
 
 # -()- Full runs
 use_location_ids: []

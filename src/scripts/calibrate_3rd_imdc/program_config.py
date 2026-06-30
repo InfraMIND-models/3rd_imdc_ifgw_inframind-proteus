@@ -12,7 +12,7 @@ class Stage1Config(BaseConfig):
     """Stage 1 configuration: Broad exploration most free
     parameters."""
 
-    num_simulations: int = 2 ** 12
+    num_simulations: int = 2 ** 20
 
     # Number of data points in the pre-simulation period
     # This is used to determine the prior for the notif_relative_scale parameter
@@ -27,7 +27,7 @@ class Stage2Config(BaseConfig):
     Nuisance parameters are fixed to optimal values
     provided by stage 1.
     """
-    num_simulations: int = 2 ** 12
+    num_simulations: int = 2 ** 20
 
     # free_params: Field[list[str]] = field(default_factory=lambda: [
     free_params: Field[list[str]] = [
@@ -50,7 +50,7 @@ class Stage3Config(BaseConfig):
     """Stage 3 configuration: Adjustment of confidence
     intervals to match coverages.
     """
-    num_simulations: int = 2 ** 12
+    num_simulations: int = 2 ** 18
 
     sampling_seed: int = 321
     posterior_seed: int = 45  # Seed for any sampling procedure in stage 3 (e.g. KDE sampling)
@@ -78,12 +78,9 @@ class ProgramConfig(BaseConfig):
     calibration_end_epiweek: int = 25  # Of the next year
 
     # --- Locations and years to run
-    # use_location_ids = ["SP", "SE", "MG", "PA"]  # Runs all!
-    # use_location_ids: list[str] = ["MG"]
     use_location_ids = []  # Runs all!
     exclude_location_ids: list[str] = list()
     use_years = list(range(2022, 2023))
-    # use_years = list(range(2016, 2023))
     ncpus = 1
 
     # Split simulations in sequential chunks.
@@ -97,12 +94,4 @@ class ProgramConfig(BaseConfig):
 
     def preprocess(self, *args, **kwargs):
         super().preprocess(*args, **kwargs)
-
-        # # If a separate simulation config file is provided,
-        # #    load it and REPLACE sim_cfg.
-        # #    Obs: For compatibility it cannot just update, otherwise the
-        # #    validation `from_config_dict()` would not be called.
-        # if self.sim_config_fpath is not None:
-        #     sim_config_dict = load_yaml_dict(self.sim_config_fpath)
-        #     # self.sim_cfg.update_from_dict(sim_config_dict)  # Wont call validation
-        #     self.sim_cfg = SimulationConfig.from_dict(sim_config_dict)
+        self.convert_path_fields()

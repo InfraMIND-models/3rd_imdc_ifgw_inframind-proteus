@@ -163,26 +163,6 @@ def _get_scaled_bounds(
     return l_bounds, u_bounds
 
 
-
-# def _transform_sampled_parameters(
-#         lhs_scaled: np.ndarray,
-#         param_scales: dict[str, str],
-#         param_names: list[str],
-# ):
-#     """
-#     Apply non-linear scaling transformations to the sampled parameters in-place.
-#     """
-#     for i, param_name in enumerate(param_names):
-#         scale = param_scales.get(param_name, "linear").lower()
-#
-#         # Apply exponential transformation for log-scale parameters
-#         if scale == "log":
-#             lhs_scaled[:, i] = np.exp(lhs_scaled[:, i])
-#
-#         if scale == "inverse":
-#             lhs_scaled[:, i] = 1.0 / lhs_scaled[:, i]
-
-
 def _scale_params_with_priors(
     samples: np.ndarray,
     param_ranges: dict[str, list[float]],

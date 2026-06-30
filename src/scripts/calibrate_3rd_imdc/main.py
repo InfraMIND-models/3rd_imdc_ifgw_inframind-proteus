@@ -56,7 +56,7 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
 
     parser.add_argument(
         "--output-dir", "--out", "-o",
-        default=ProgramConfig.output_dir,
+        default=None,
         type=Path,
         help="Path to the output directory.",
     )

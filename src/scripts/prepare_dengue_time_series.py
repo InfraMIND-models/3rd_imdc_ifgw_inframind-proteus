@@ -14,7 +14,7 @@ class Config:
         # Locate project root directory
         self.root_dir = Path(__file__).resolve().parent.parent.parent
 
-        self.imdc_regional_fpath = Path("data/data_imdc_2026/map_regional_health.csv")
+        # self.imdc_regional_fpath = Path("data/data_imdc_2026/map_regional_health.csv")
         self.imdc_population_fpath = Path("data/data_imdc_2026/datasus_population_2001_2025.csv.gz")
         self.imdc_dengue_fpath = Path("data/data_imdc_2026/dengue.csv.gz")
 
@@ -29,7 +29,7 @@ def main():
     print("Working directory: ", os.getcwd())
 
     dvars = DiseaseTimeSeriesVariables()
-    imdc_regional_df = pd.read_csv(config.imdc_regional_fpath)
+    # imdc_regional_df = pd.read_csv(config.imdc_regional_fpath)
     imdc_population_df = pd.read_csv(config.imdc_population_fpath)
     imdc_dengue_df = pd.read_csv(config.imdc_dengue_fpath, parse_dates=["date"])
 
@@ -40,10 +40,6 @@ def main():
     export_dengue_uf_weekly(
         uf_dengue_df, config.uf_dengue_dirpath, config.uf_dengue_fname_fmt, dvars
     )
-
-
-    # print("WATCHPOINT")
-    # pass
 
 
 def aggregate_dengue_to_uf(
