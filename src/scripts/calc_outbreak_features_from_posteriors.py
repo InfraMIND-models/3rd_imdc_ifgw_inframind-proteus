@@ -152,7 +152,7 @@ def parse_args_get_dict(argv: list[str] | None = None) -> dict[str, Any]:
 
     parser.add_argument(
         "--output-dir", "--out", "-o",
-        # default=ProgramConfig.output_dir,
+        default=None,
         required=True,
         type=Path,
         help="Path to the location-year specific output directory.",

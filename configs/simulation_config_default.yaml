@@ -102,6 +102,7 @@ scoring:
 
 # ----------------------------------------------------------------------------
 output:
+  # NOTE: This config is mostly unused, as the export operations are not delegated to the simulator object
   main_dir: "outputs/prototype_run_dynamic_model"
 
   # Data to keep in the output structure (python)
