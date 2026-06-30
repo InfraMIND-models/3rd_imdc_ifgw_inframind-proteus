@@ -1,4 +1,5 @@
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Any, Union
 
 
@@ -108,3 +109,19 @@ class BaseConfig:
         #         result[f.name] = value
         #
         # return result
+
+    # ======
+    def convert_path_fields(self, suffixes: list[str] = None):
+        """Preprocessing helper to convert fields ending with certain
+        suffixes to Path objects.
+
+        Changes made in place.
+        """
+        suffixes = suffixes or ["_fpath", "_dir", "_dirpath"]
+        for name, value in self.items():
+            if not isinstance(name, str):
+                continue
+            for suffix in suffixes:
+                if name.endswith(suffix):
+                    setattr(self, name, Path(value))
+                    break

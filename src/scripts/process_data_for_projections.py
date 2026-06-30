@@ -82,7 +82,7 @@ class ProgramConfig(BaseConfig):
 
     use_location_ids: list = []
 
-    # use_years: list[int] = [2025]  # test
+    # use_projection_years: list[int] = [2025]  # test
     use_projection_years: list[int] = [2022, 2023, 2024, 2025]  # Validation round projection years
 
     use_calibration_years: list[int] = [
@@ -118,6 +118,8 @@ class ProgramConfig(BaseConfig):
                 lambda: list(),
                 **self.exclude_years_by_location,
             )
+
+        self.convert_path_fields()
 
 
 class ProgramData:
@@ -173,7 +175,7 @@ def parse_args_get_dict(argv) -> dict:
 
     parser.add_argument(
         "--output-dir", "--out", "-o",
-        default=ProgramConfig.output_dir,
+        # default=ProgramConfig.output_dir,
         type=Path,
         help="Path to the output directory.",
     )
@@ -193,7 +195,7 @@ def parse_args_get_dict(argv) -> dict:
     )
 
     parser.add_argument(
-        "--use-years",  "-y",
+        "--use-projection-years",  "-y",
         default=None,
         type=int,
         action="append",
@@ -201,7 +203,7 @@ def parse_args_get_dict(argv) -> dict:
             "List of years to prepare projections for. "
             "Can be specified multiple times. "
             "Using this argument resets the default list from the program or "
-            "config file. Example: \"-y 2022 -y 2023\" will set use_years to "
+            "config file. Example: \"-y 2022 -y 2023\" will set use_projection_years to "
             "[2022, 2023], regardless of what other years have been specified"
             "on the defaults."
         )
@@ -776,6 +778,9 @@ def _plot_bayesian_update(
                 label='Prior',
             )
 
+            # "predictions" (just skip to use the color)
+            ax.bar([], [], label="Predicted")
+
             # Posterior distribution (after outbreak feature update)
             ax.hist(
                 avail_samples_df[param_name],
@@ -814,7 +819,7 @@ def _plot_bayesian_update(
         ax.set_title("Calibration years")
         ax.set_ylabel("Proportion")
         ax.xaxis.set_major_locator(
-            mpl.ticker.MultipleLocator(2)
+            mpl.ticker.MultipleLocator(4)
         )
         ax.xaxis.set_minor_locator(
             mpl.ticker.MultipleLocator(1)

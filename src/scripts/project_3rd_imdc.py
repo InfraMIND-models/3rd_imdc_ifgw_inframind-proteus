@@ -71,7 +71,7 @@ class ProgramConfig(BaseConfig):
     # --- Locations and years to run
     use_location_ids = []  # Runs all!
     exclude_location_ids: list[str] = list()
-    use_years = [2022, 2023, 2024, 2025]
+    use_projection_years = [2022, 2023, 2024, 2025]
 
     ncpus = 1
 
@@ -94,6 +94,24 @@ class ProgramConfig(BaseConfig):
     imdc_projection_epiweek_start = 41
     imdc_projection_epiweek_end = 40  # Of the next year
     # imdc_predictive_interval_colname_fmt = "pred_{level:.0%}"  # e.g. pred_50%, pred_80%, etc
+
+    def preprocess(self, *args, **kwargs):
+        super().preprocess(*args, **kwargs)
+
+        # --- Turn fields ending with certain suffixes into Path objects
+        self.convert_path_fields()
+
+        # --- Validate config values
+        if self.imdc_projection_epiweek_start < 1 or self.imdc_projection_epiweek_start > 53:
+            raise ValueError(
+                f"Invalid imdc_projection_epiweek_start: {self.imdc_projection_epiweek_start}. "
+                f"Must be between 1 and 53."
+            )
+        if self.imdc_projection_epiweek_end < 1 or self.imdc_projection_epiweek_end > 53:
+            raise ValueError(
+                f"Invalid imdc_projection_epiweek_end: {self.imdc_projection_epiweek_end}. "
+                f"Must be between 1 and 53."
+            )
 
 
 
@@ -129,7 +147,7 @@ def parse_args_get_dict(argv) -> dict:
 
     parser.add_argument(
         "--output-dir", "--out", "-o",
-        default=ProgramConfig.output_dir,
+        # default=ProgramConfig.output_dir,
         type=Path,
         help="Path to the output directory.",
     )
@@ -149,7 +167,7 @@ def parse_args_get_dict(argv) -> dict:
     )
 
     parser.add_argument(
-        "--use-years",  "-y",
+        "--use-projection-years",  "-y",
         default=None,
         type=int,
         action="append",
@@ -157,7 +175,7 @@ def parse_args_get_dict(argv) -> dict:
             "List of years to prepare projections for. "
             "Can be specified multiple times. "
             "Using this argument resets the default list from the program or "
-            "config file. Example: \"-y 2022 -y 2023\" will set use_years to "
+            "config file. Example: \"-y 2022 -y 2023\" will set use_projection_years to "
             "[2022, 2023], regardless of what other years have been specified"
             "on the defaults."
         )
@@ -209,7 +227,7 @@ def load_and_preprocess_global_data(cfg: ProgramConfig, data: ProgramData):
         include_list=cfg.use_location_ids,
         exclude_list=None,
     )
-    data.years = cfg.use_years
+    data.years = cfg.use_projection_years
     data.location_year_index = pd.MultiIndex.from_product(
         [data.location_ids, data.years],
         names=["uf", "season"]
