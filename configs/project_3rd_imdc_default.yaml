@@ -1,4 +1,9 @@
-# -()- For quick tests
-use_location_ids: ["AC", "SP"]
-use_years: [2022, 2025]
-ncpus: 1
+## -()- For quick tests
+#use_location_ids: ["AC", "SP"]
+#use_years: [2022, 2025]
+#ncpus: 1
+
+# -()- Full runs
+use_location_ids: []
+use_years: [2022, 2023, 2024, 2025]
+ncpus: 6

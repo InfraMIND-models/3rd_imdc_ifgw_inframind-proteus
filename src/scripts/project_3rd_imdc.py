@@ -23,7 +23,8 @@ from inframind_proteus.outbreak_dynamics import SimulationConfig, RenewalSimulat
 from inframind_proteus.outbreak_dynamics.simulator import sample_negative_binomial_trajectories
 from inframind_proteus.outbreak_dynamics.utils import (
     parse_set_arguments_with_yaml, load_yaml_dict, year_week_to_date,
-    apply_include_exclude_logic, map_parallel_or_sequential, make_yaml_exportable_dict, save_yaml_dict, add_set_argument
+    apply_include_exclude_logic, map_parallel_or_sequential, make_yaml_exportable_dict, save_yaml_dict,
+    add_set_argument, rotate_ax_labels
 )
 
 
@@ -78,6 +79,22 @@ class ProgramConfig(BaseConfig):
     #   Use lower values to reduce RAM usage.
     #   Use None to keep default
     simulator_max_chunk_size: int | None = None
+
+    # --- IMDC submission parameters
+    # See https://sprint.mosqlimate.org/instructions/ for details
+    # Submission function doc: https://mosqlimate-client.readthedocs.io/en/latest/reference/predictions/#mosqlient.registry._prediction_post_impl.upload_prediction
+    imdc_required_predictive_intervals = [  # OBS: Excludes median
+        0.50, 0.80, 0.90, 0.95
+    ]
+    imdc_median_prediction_colname = "pred"
+    imdc_pi_colname_fmt_dict = {
+        "lower": "lower_{level:.0%}",  # e.g. lower_50%, lower_80%, etc
+        "upper": "upper_{level:.0%}",  # e.g. upper_50%, upper_80%, etc
+    }
+    imdc_projection_epiweek_start = 41
+    imdc_projection_epiweek_end = 40  # Of the next year
+    # imdc_predictive_interval_colname_fmt = "pred_{level:.0%}"  # e.g. pred_50%, pred_80%, etc
+
 
 
 class ProgramData:
@@ -269,6 +286,9 @@ def run_projections_for_location_year(
     if not (df.index == pd.RangeIndex(df.shape[0])).all():
         raise ValueError()
 
+    # Modify num simulations to prevent warning
+    _d["simulation"]["num_simulations"] = df.shape[0]
+
     # Simulator and simulations
     # ==============
     # --- Create simulator object with modified configuration dictionary
@@ -320,6 +340,90 @@ def run_projections_for_location_year(
         columns=sim_results.mean_cases_df.columns,
     )
 
+    # Calculate prediction intervals
+    # ==========
+    median_col = cfg.imdc_median_prediction_colname
+    full_pi_df = pd.DataFrame(
+        {
+            median_col: cases_df.median(axis=0),
+        }
+    )
+    for level in cfg.imdc_required_predictive_intervals:
+        lower_col = cfg.imdc_pi_colname_fmt_dict["lower"].format(level=level)
+        upper_col = cfg.imdc_pi_colname_fmt_dict["upper"].format(level=level)
+        full_pi_df[lower_col] = cases_df.quantile(q=(1. - level) / 2, axis=0)
+        full_pi_df[upper_col] = cases_df.quantile(q=1. - (1. - level) / 2, axis=0)
+
+    # and prepare a submission-ready data frame
+
+    # --- Temporal
+    subm_start_date = year_week_to_date(year, cfg.imdc_projection_epiweek_start).date()
+    subm_end_date = year_week_to_date(year + 1, cfg.imdc_projection_epiweek_end).date()
+
+    # ----
+    nrows = 2
+    fig, axes = plt.subplots(
+        nrows=2, ncols=1, figsize=(6, 3 * nrows), sharex=True
+    )
+
+    # Visualize trajectories and quantile predictions
+    # --------
+    ax = axes[0]
+    df = full_pi_df.copy()
+    for level in cfg.imdc_required_predictive_intervals:
+        lower_col = cfg.imdc_pi_colname_fmt_dict["lower"].format(level=level)
+        upper_col = cfg.imdc_pi_colname_fmt_dict["upper"].format(level=level)
+        ax.fill_between(
+            df.index, df[lower_col], df[upper_col],
+            alpha=0.3, label=f"{int(level*100)}% PI"
+        )
+    ax.plot(df[median_col], label="Median")
+
+    # Prediction window bounds
+    ax.axvline(subm_start_date, color="k", linestyle="--")
+    ax.axvline(subm_end_date, color="k", linestyle="--")
+
+    # Optional: Observation data overlay
+    # -----
+    overlay_with_observations = True
+    if overlay_with_observations:
+        from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
+        cache = DiseaseTimeSeriesCache()
+        obs_sr = cache.get_location(location_id)
+
+        # -()- Observations from all previous years
+        # Rescale all dates to the same year via epiweeks
+        # (not that simple)
+        # TODO
+
+        # -()- Observations from the validation year (validation round)
+        obs_sr = obs_sr.reindex(cases_df.columns)
+        if obs_sr.shape[0] > 0:
+            ax.plot(obs_sr, "s", color="k", ms=2 ,label="Observations")
+
+    ax.set_ylabel("Cases")
+    ax.legend()
+
+    # All trajectories
+    # ------
+    ax = axes[1]
+    ax.plot(cases_df.T, color="blue", alpha=0.08)
+    rotate_ax_labels(ax)
+
+    fig.suptitle("Projections for {location_id} in {year}".format(location_id=location_id, year=year))
+    fig.tight_layout()
+    # fig.show()
+
+    plots_out_dir = out_dir
+    plots_out_dir.mkdir(parents=True, exist_ok=True)
+    _fpath = plots_out_dir / f"projections_{location_id}_{year}.pdf"
+    fig.savefig(_fpath)
+    plt.close(fig)
+
+
+    # subm_index = pd.date_range(start=subm_start_date, end=subm_end_date, freq="D")
+    # subm_df = full_pi_df.reindex(subm_index)
+    # subm_df.index.name = "date"
 
     return
 
