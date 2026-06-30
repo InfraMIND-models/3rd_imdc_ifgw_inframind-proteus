@@ -55,6 +55,29 @@ class BaseConfig:
             cfg.preprocess()
         return cfg
 
+    def _full_dict(self):
+        """Return an iterator over the config's items, including class and
+        object attributes.
+        """
+        # Select non-callable and non-private class attributes
+        d = {
+            key: value for key, value in self.__class__.__dict__.items()
+            if not key.startswith("__") and not callable(value)
+        }
+        # Update with instance attributes, which may override class attributes
+        d.update(self.__dict__)
+
+        return d
+
+    def items(self):
+        """Return an iterator over the config's items, including class and
+        object attributes.
+
+        This method calls `self._full_dict()` to get a dictionary of all
+        attributes and then returns its items.
+        """
+        return self._full_dict().items()
+
     def to_dict(self) -> dict[str, Any]:
         """Convert the config object to a dictionary, recursing through
         nested config members.
@@ -67,16 +90,9 @@ class BaseConfig:
         exporting to YAML.
         """
 
-        # Select non-callable and non-private class attributes
-        d = {
-            key: value for key, value in self.__class__.__dict__.items()
-            if not key.startswith("__") and not callable(value)
-        }
-        # Update with instance attributes, which may override class attributes
-        d.update(self.__dict__)
-
         # Recurse into nested BaseConfig objects
-        for field_name, field_value in d.items():
+        d = self._full_dict()
+        for field_name, field_value in self.items():
             if isinstance(field_value, BaseConfig) or hasattr(field_value, "to_dict"):
                 d[field_name] = field_value.to_dict()
 
