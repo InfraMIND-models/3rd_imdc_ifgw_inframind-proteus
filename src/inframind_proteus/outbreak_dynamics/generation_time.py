@@ -49,6 +49,7 @@ class BaseGT(ABC):
         gt_max_steps: int,
         num_time_steps: int,
         step_dt: int,
+        normalize: bool = True,
     ) -> np.ndarray:
         """Return the (reversed) generation time PMF.
 
@@ -60,6 +61,8 @@ class BaseGT(ABC):
             Number of simulation time steps (length of the time axis).
         step_dt:
             Duration of each time step in days.
+        normalize:
+            Whether the PMF should be re-normalized to fix truncation effects.
 
         Returns
         -------
@@ -96,6 +99,7 @@ class ConstantGammaGT(BaseGT):
         gt_max_steps: int,
         num_time_steps: int,
         step_dt: int,
+        normalize: bool = True,
     ) -> np.ndarray:
         """Compute the gamma GT PMF and broadcast over the time axis.
 
@@ -112,7 +116,18 @@ class ConstantGammaGT(BaseGT):
         gt_vals = np.arange(0, (gt_max_steps + 1) * step_dt, step_dt)  # (gt_max_steps+1,)
 
         cdf = scipy.stats.gamma.cdf(gt_vals, a=self.shape, scale=self.scale)  # (gt_max_steps+1,)
-        pmf = np.diff(cdf)                                                     # (gt_max_steps,)
+        pmf = np.diff(cdf)
+        # (gt_max_steps,)
+
+        if normalize:
+            pmf_sum = pmf.sum()
+            if pmf_sum > 0:
+                pmf /= pmf_sum
+            else:
+                raise ValueError(
+                    f"GT PMF sum is zero, check shape={self.shape}, scale={self.scale}, "
+                    f"gt_max_steps={gt_max_steps}, step_dt={step_dt}"
+                )
 
         # Reverse: index 0 = largest lag, aligns with oldest entry in the
         # infection history window used by the renewal equation

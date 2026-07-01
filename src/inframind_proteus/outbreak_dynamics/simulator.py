@@ -309,13 +309,12 @@ class SimulationOutput:
             A new instance with concatenated data frames and arrays.
         """
         rt_dfs = [o.rt_df for o in objs if o.rt_df is not None]
+        scoring_objs = [o.scoring for o in objs if o.scoring is not None]
         return cls(
             infec_df=pd.concat([o.infec_df for o in objs], axis=0),
             mean_cases_df=pd.concat([o.mean_cases_df for o in objs], axis=0),
             case_beam_df=pd.concat([o.case_beam_df for o in objs], axis=0),
-            scoring=SimulationScoring.concat(
-                [o.scoring for o in objs if o.scoring is not None]
-            ),
+            scoring=SimulationScoring.concat(scoring_objs) if scoring_objs else None,
             rt_df=pd.concat(rt_dfs, axis=0) if rt_dfs else None,
             config=objs[0].config,  # Assumes all outputs share the same config
         )
@@ -421,7 +420,7 @@ class RenewalSimulator:
             ``notif_relative_scale`` column for relative scaling.
         initial_infec_df:
             Seed infection values for the warm-up window.
-            Shape ``(num_simulations, gt_max_steps)``.
+            Shape ``(num_simulations, warmup_steps)``.
         observations_sr:
             Observed case counts indexed by time step.  Required in
             calibration mode; ignored in projection mode.
@@ -435,6 +434,7 @@ class RenewalSimulator:
         num_sim = params_df.shape[0]  # Infer from params_df
         num_steps = cfg.num_time_steps
         gt_steps = self._gt_max_steps
+        warmup_steps = initial_infec_df.shape[1]
         step_dt = self._step_dt
 
         # ------------------------------------------------------------------
@@ -449,11 +449,17 @@ class RenewalSimulator:
         #         "Number of rows in `params_df` does not match "
         #         "config.num_simulations. Will run the number on params_df."
         #     )
-        if initial_infec_df.shape != (num_sim, gt_steps):
+        if initial_infec_df.shape[0] != num_sim:
             raise ValueError(
-                f"initial_infec_df must have shape ({num_sim}, {gt_steps}); "
-                f"got {initial_infec_df.shape}"
+                f"initial_infec_df has {initial_infec_df.shape[0]} rows; "
+                f"expected {num_sim}"
             )
+        if initial_infec_df.shape[1] < gt_steps:
+            raise ValueError(
+                f"initial_infec_df must have at least {gt_steps} columns; "
+                f"got {initial_infec_df.shape[1]}"
+            )
+
         # if not params_df.index.isin(initial_infec_df.index).all():  # contains
         if not (initial_infec_df.index == params_df.index).all():  # exact match
             raise ValueError(
@@ -531,7 +537,7 @@ class RenewalSimulator:
         # 6. Observation model (crop warm-up first)
         # ------------------------------------------------------------------
         rng = np.random.default_rng(cfg.rng_seed)
-        infec_sim = infec_vec[:, gt_steps:]  # (num_sim, num_steps)
+        infec_sim = infec_vec[:, warmup_steps:]  # (num_sim, num_steps)
 
         mean_cases_vec, case_beam_df = self._apply_observation_model(
         # case_beam_df = self._apply_observation_model(
@@ -647,6 +653,7 @@ class RenewalSimulator:
     def build_simulation_data(
             self,
             config: SimulationConfig = None,
+            sampling_kwargs: dict | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Build auxiliary data frames for simulations.
 
@@ -655,10 +662,11 @@ class RenewalSimulator:
         """
         # ---
         config = config or self.config
+        sampling_kwargs = sampling_kwargs or dict()
 
         # Data frame with all model parameters
         params_df = build_calibration_params_df(
-            config.num_simulations, config.sampling
+            config.num_simulations, config.sampling, **sampling_kwargs
         )
         # Re-assign num_simulations, since prev. step may change it
         config.num_simulations = params_df.shape[0]
@@ -1119,6 +1127,54 @@ class RenewalSimulator:
 
         return cls(rt_model=rt_model, gt_model=gt_model, config=config)
 
+
+def sample_negative_binomial_trajectories(
+        expectancy: np.ndarray,
+        overdisp: np.ndarray,
+        rng: np.random.Generator,
+) -> np.ndarray:
+    """Apply the negative-binomial observation model to infection counts.
+
+    This samples actual numbers of cases for each time and each abstract
+    infection trajectory, rather than specifying prediction intervals.
+
+    Parameters
+    ----------
+    expectancy: np.ndarray
+        Expected number of cases (mean of the negative binomial) at each
+        time (column index) for each trajectory (row index).
+        Expected shape: (num_simulations, num_time_steps).
+    overdisp: np.ndarray
+        Overdispersion parameter of the negative binomial for each trajectory.
+        Expected shape: (num_simulations,).
+    rng: np.random.Generator
+        A pre-initialized NumPy random generator, or data to initialize it.
+    """
+    # Prep work
+    # ---------
+    # -()- Strict shape checks. Could be made more flexible (e.g. array and scalar)
+    if expectancy.ndim != 2:
+        raise ValueError(f"expectancy must be 2D; got shape {expectancy.shape}")
+    if overdisp.ndim != 1:
+        raise ValueError(f"overdisp must be 1D; got shape {overdisp.shape}")
+    if expectancy.shape[0] != overdisp.shape[0]:
+        raise ValueError(
+            f"expectancy.shape[0] ({expectancy.shape[0]}) must match "
+            f"overdisp.shape[0] ({overdisp.shape[0]})"
+        )
+
+    rng = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
+
+    # -------
+    _expectancy = expectancy
+    _overdisp = overdisp[:, np.newaxis]
+    p = _overdisp / (_overdisp + _expectancy)
+
+    cases_vec: np.ndarray = rng.negative_binomial(
+        n=_overdisp, p=p, size=_expectancy.shape
+    )
+
+    return cases_vec
 
 _nb_readonly_arr = nb.types.Array(nb.types.float64, 2, 'A', readonly=True)
 @nb.njit(

@@ -1,16 +1,30 @@
 
-## -()- For testing
-#use_location_ids: ["AC", "SP", "ES"]
+## -()- Quick test runs
+#use_location_ids: ["AC", "SP"]
 #use_projection_years: [2022, 2023]  # For testing
+#ncpus: 1
+#calibrations_main_dir: "outputs/quick_test_runs/calibrations"  # -()- Take from quick test as well
+#output_dir: "outputs/quick_test_runs"
 
 # -()- Full run
 use_location_ids: []
 use_projection_years: [2022, 2023, 2024, 2025]
-ncpus: 4
+ncpus: 8
+
+
+## -()- Sensitivity: No update from outbreak features
+#use_location_ids: []
+#use_projection_years: [2022, 2023, 2024, 2025]
+#ncpus: 6
+#output_dir: "outputs/sensitivity/no_update_from_outbreak_features"
+#outbreak_feature_names: []  # No outbreak features considered
+
 
 exclude_years_by_location:
   ES: [2021,]  # 2021: Absent cases in data
 
 #outbreak_features_predictions_dir: "outputs/outbreak_features_mockup"  # Use mockup dir
 outbreak_features_predictions_dir: "predictions"  # Use separate `predictions` dir for now
-use_outbreak_features: ["peak_week",]  # Just peak week for now.
+#outbreak_feature_names: [  # Select which outbreak features are used to update distributions. Use default otherwise.
+#  "peak_week",
+#]

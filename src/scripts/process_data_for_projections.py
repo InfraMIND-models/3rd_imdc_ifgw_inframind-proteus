@@ -24,7 +24,6 @@ from inframind_proteus.empirical_data import DiseaseTimeSeriesCache
 from inframind_proteus.outbreak_dynamics import SimulationConfig
 from inframind_proteus.outbreak_dynamics.outbreak_features import OutbreakFeaturePredictionsCache
 
-print("Importing libraries...")
 from inframind_proteus import BaseConfig
 from inframind_proteus.outbreak_dynamics.utils import load_yaml_dict, parse_set_arguments_with_yaml, add_set_argument, \
     apply_include_exclude_logic, map_parallel_or_sequential, make_axes_seq, save_yaml_dict, make_yaml_exportable_dict
@@ -83,7 +82,7 @@ class ProgramConfig(BaseConfig):
 
     use_location_ids: list = []
 
-    # use_years: list[int] = [2025]  # test
+    # use_projection_years: list[int] = [2025]  # test
     use_projection_years: list[int] = [2022, 2023, 2024, 2025]  # Validation round projection years
 
     use_calibration_years: list[int] = [
@@ -119,6 +118,8 @@ class ProgramConfig(BaseConfig):
                 lambda: list(),
                 **self.exclude_years_by_location,
             )
+
+        self.convert_path_fields()
 
 
 class ProgramData:
@@ -159,6 +160,7 @@ class ProgramData:
     posterior_samples_df: pd.DataFrame
     # Final product for each location and projection year
 
+
 def parse_args_get_dict(argv) -> dict:
     """"""
     parser = ArgumentParser()
@@ -173,7 +175,7 @@ def parse_args_get_dict(argv) -> dict:
 
     parser.add_argument(
         "--output-dir", "--out", "-o",
-        default=ProgramConfig.output_dir,
+        # default=ProgramConfig.output_dir,
         type=Path,
         help="Path to the output directory.",
     )
@@ -193,7 +195,7 @@ def parse_args_get_dict(argv) -> dict:
     )
 
     parser.add_argument(
-        "--use-years",  "-y",
+        "--use-projection-years",  "-y",
         default=None,
         type=int,
         action="append",
@@ -201,7 +203,7 @@ def parse_args_get_dict(argv) -> dict:
             "List of years to prepare projections for. "
             "Can be specified multiple times. "
             "Using this argument resets the default list from the program or "
-            "config file. Example: \"-y 2022 -y 2023\" will set use_years to "
+            "config file. Example: \"-y 2022 -y 2023\" will set use_projection_years to "
             "[2022, 2023], regardless of what other years have been specified"
             "on the defaults."
         )
@@ -776,6 +778,9 @@ def _plot_bayesian_update(
                 label='Prior',
             )
 
+            # "predictions" (just skip to use the color)
+            ax.bar([], [], label="Predicted")
+
             # Posterior distribution (after outbreak feature update)
             ax.hist(
                 avail_samples_df[param_name],
@@ -814,7 +819,7 @@ def _plot_bayesian_update(
         ax.set_title("Calibration years")
         ax.set_ylabel("Proportion")
         ax.xaxis.set_major_locator(
-            mpl.ticker.MultipleLocator(2)
+            mpl.ticker.MultipleLocator(4)
         )
         ax.xaxis.set_minor_locator(
             mpl.ticker.MultipleLocator(1)
@@ -826,14 +831,15 @@ def _plot_bayesian_update(
         txt = ""
         _n_samples = posterior_samples_df.shape[0]
         _n_dup = posterior_samples_df.duplicated().sum()
-        _weights = posterior_samples_df["weight"]
+        # _weights = posterior_samples_df["weight"]
+        _weights = posterior_weights  # All weights, not just sampled ones
         _dominance = (_weights**2).sum() / (_weights.sum()**2)
 
         txt += f"Total samples: {_n_samples}\n"
         txt += f"Duplicate samples: {_n_dup} ({_n_dup / _n_samples * 100:0.2f}%)\n"
-        # txt += f"Weight dominance: {_dominance:0.3e}\n"  # Revise relevance of this metric..
+        txt += f"Weight dominance: {_dominance:0.3e}\n"
 
-        ax.text(0.1, 0.9, txt, va="top")
+        ax.text(0.05, 0.9, txt, va="top")
 
         fig.tight_layout()
 

@@ -2,7 +2,7 @@ simulation:
   mode: calibration            # "calibration" | "projection"
   num_simulations: 1024 # 1024, 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
   num_time_steps: 68           # steps after the warm-up window
-  gt_max: 49                   # maximum generation time (days)
+  gt_max: 35                   # maximum generation time (days)
   rng_seed: 123
 
 # ----------------------------------------------------------------------------
@@ -26,8 +26,9 @@ location:
 generation_time:
   model: constant_gamma
   params:
-    shape: 10.0
-    scale: 1.8          # mean = shape × scale ≈ 18 days
+    # -()- Mean = 21 days, std = 7 days
+    shape: 9.0
+    scale: 2.333333
 
 # ----------------------------------------------------------------------------
 reproduction_number:
@@ -84,7 +85,7 @@ initial_infections:
   method: ones
   # Method parameters (currently unused for "ones").
   params: {}
-  num_steps: 7  # Ideally >= gt_max in steps
+  num_steps: 5  # Ideally >= gt_max in steps
 
 # ----------------------------------------------------------------------------
 observation_model:
@@ -101,6 +102,7 @@ scoring:
 
 # ----------------------------------------------------------------------------
 output:
+  # NOTE: This config is mostly unused, as the export operations are not delegated to the simulator object
   main_dir: "outputs/prototype_run_dynamic_model"
 
   # Data to keep in the output structure (python)

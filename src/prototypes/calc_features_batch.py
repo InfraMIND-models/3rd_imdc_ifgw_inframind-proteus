@@ -9,6 +9,7 @@ from inframind_proteus.outbreak_dynamics.utils import map_parallel_or_sequential
 def main():
     xt0 = time.time()
     main_out_dir = Path("outputs/validation_round_calibration")
+    # main_out_dir = Path("outputs/quick_test_runs/calibrations2")
     # main_out_dir = Path(".local/mind-runner_local/validation_round_calibration")
 
     # --- Regex
@@ -28,22 +29,6 @@ def main():
     map_parallel_or_sequential(
         _task, _contents, ncpus=8
     )
-
-    #
-    # # -()- Multiple program calls approach
-    # # ====================================
-    # def _task(subdir):
-    #     cmd = "uv run calc-outbreak-features-from-posteriors"
-    #     cmd += f" -o {subdir}"
-    #     os.system(cmd)
-    #     return subdir
-    #
-    # # _contents = subdirs[:12] # Limit to first 12 subdirs for testing
-    # _contents = subdirs
-    #
-    # map_parallel_or_sequential(
-    #     _task, _contents, ncpus=6
-    # )
 
     # =========
 

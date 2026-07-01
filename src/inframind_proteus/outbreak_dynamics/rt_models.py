@@ -83,7 +83,7 @@ class LogisticRT(BaseRT):
 
     The logistic formula (decreasing from *rmax* toward *rmin*) is::
 
-        R(t) = rmax - (rmax - rmin) / (1 + exp((center - t) / width))
+        R(t) = rmax - (rmax - rmin) / (1 + exp(-(t - center) / width))
 
     Expected columns in ``params_df``
     ----------------------------------
@@ -167,8 +167,6 @@ class EnvelopedLogisticRT(BaseRT):
     Modifies the prototype "LogisticRT" by smoothing the transitions between
     outbreak season and off-season with a logistic envelope.
 
-    The baseline off-season value is assumed to be 1 and is not a parameter.
-
     Defining `logistic` as:
             logistic(t, center, width) = 1 / (1 + exp((center - t) / width))
 
@@ -179,7 +177,7 @@ class EnvelopedLogisticRT(BaseRT):
         E(t) = logistic(t, start, width) * (1 - logistic(t, start + end, width))
 
     The final expresison for R(t) is:
-        R(t) = 1 + E(t) * (C(t) - 1)
+        R(t) = roff + E(t) * (C(t) - roff)
 
     Expected columns in ``params_df``
     ----------------------------------
@@ -213,7 +211,7 @@ class EnvelopedLogisticRT(BaseRT):
     def logistic(t, center, width):
         """Logistic function with value 0.5 at t=center and steepness controlled by width."""
         with np.errstate(over="ignore"):
-            return 1.0 / (1.0 + np.exp((center - t) / width))
+            return 1.0 / (1.0 + np.exp(-(t - center) / width))
 
     def generate(
         self,
