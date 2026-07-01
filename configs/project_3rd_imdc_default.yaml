@@ -9,6 +9,12 @@ use_location_ids: []
 use_projection_years: [2022, 2023, 2024, 2025]
 ncpus: 12
 
+## -()- Alternative 01: Add outbreak features likelihood temperature
+#output_dir: "outputs/sensitivity/outb_feats_ll_temperature_v01"
+
+## -()- Alternative 02: Higher number of projection simulations
+#output_dir: "outputs/sensitivity/change_post_sample_size_01"
+
 ## -()- Sensitivity: No update from outbreak features
 #use_location_ids: []
 #use_projection_years: [2022, 2023, 2024, 2025]

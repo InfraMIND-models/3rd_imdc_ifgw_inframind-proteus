@@ -1,10 +1,10 @@
 [project]
 name = "inframind-proteus"
 description = "Dynamic and statistical model for the 3rd Infodengue-Mosqlimate Dengue Challenge (IMDC)."
-authors = [
-  {name = "Paulo C. Ventura", email = "paulo.pc.vs@gmail.com"},
-    # TODO: Add others
-]
+#authors = [
+#  {name = "Paulo C. Ventura", email = "paulo.pc.vs@gmail.com"},
+#    # TODO: Add others
+#]
 version = "0.1.0"
 requires-python = ">=3.12"
 readme = "README.md"
@@ -64,6 +64,7 @@ dev = [
     "pytest>=9.0.3",
     "nbdime>=4.0.1",
     "salib>=1.5.2",
+    "pypdf>=6.4.2",
 ]
 
 

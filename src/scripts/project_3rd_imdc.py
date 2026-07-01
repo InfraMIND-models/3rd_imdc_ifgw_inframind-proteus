@@ -88,8 +88,8 @@ class ProgramConfig(BaseConfig):
     ]
     imdc_median_prediction_colname = "pred"
     imdc_pi_colname_fmt_dict = {
-        "lower": "lower_{level:.0%}",  # e.g. lower_50%, lower_80%, etc
-        "upper": "upper_{level:.0%}",  # e.g. upper_50%, upper_80%, etc
+        "lower": "lower_{level100:.0f}",  # e.g. lower_50, lower_80, etc
+        "upper": "upper_{level100:.0f}",  # e.g. upper_50, upper_80, etc
     }
     imdc_projection_epiweek_start = 41
     imdc_projection_epiweek_end = 40  # Of the next year
@@ -367,8 +367,8 @@ def run_projections_for_location_year(
         }
     )
     for level in cfg.imdc_required_predictive_intervals:
-        lower_col = cfg.imdc_pi_colname_fmt_dict["lower"].format(level=level)
-        upper_col = cfg.imdc_pi_colname_fmt_dict["upper"].format(level=level)
+        lower_col = cfg.imdc_pi_colname_fmt_dict["lower"].format(level100=100 * level)
+        upper_col = cfg.imdc_pi_colname_fmt_dict["upper"].format(level100=100 * level)
         full_pi_df[lower_col] = cases_df.quantile(q=(1. - level) / 2, axis=0)
         full_pi_df[upper_col] = cases_df.quantile(q=1. - (1. - level) / 2, axis=0)
 
@@ -422,8 +422,8 @@ def run_projections_for_location_year(
     ax = axes[0]
     df = full_pi_df.copy()
     for level in cfg.imdc_required_predictive_intervals:
-        lower_col = cfg.imdc_pi_colname_fmt_dict["lower"].format(level=level)
-        upper_col = cfg.imdc_pi_colname_fmt_dict["upper"].format(level=level)
+        lower_col = cfg.imdc_pi_colname_fmt_dict["lower"].format(level100=100 * level)
+        upper_col = cfg.imdc_pi_colname_fmt_dict["upper"].format(level100=100 * level)
         ax.fill_between(
             df.index, df[lower_col], df[upper_col],
             alpha=0.3, label=f"{int(level*100)}% PI"

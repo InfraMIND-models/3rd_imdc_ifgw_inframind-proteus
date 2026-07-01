@@ -14,6 +14,7 @@ from typing import Union, Tuple, Any, Literal
 
 import pandas as pd
 import matplotlib as mpl
+import matplotlib.dates
 import matplotlib.ticker
 from matplotlib import pyplot as plt
 from scipy.stats import (
@@ -58,9 +59,6 @@ def main(argv: Union[list[str], None] = None):
     )
 
 
-    pass
-
-
 class ProgramConfig(BaseConfig):
     """Internal configuration data class for the
     `process_data_for_projections` script.
@@ -77,7 +75,7 @@ class ProgramConfig(BaseConfig):
 
     uf_table_fpath = Path("data/demographic/uf_table.csv")
 
-    num_projection_samples = 1000  # Final parameter samples to have in the end
+    num_projection_samples = 5000  # Final parameter samples to have in the end
     projection_sampling_seed = 5
 
     use_location_ids: list = []
@@ -101,6 +99,11 @@ class ProgramConfig(BaseConfig):
     outbreak_features_fit_model: Literal[
         "kde", "normal", "lognormal"
     ]  = "kde"
+
+    ll_temperature: float = 1.0  # Temperature for loglikelihood evaluation (1.0 = no change)
+    # This allows us to tune the overall influence of outbreak features.
+    # < 1 values will sharpen the likelihood, increasing their influence.
+    # > 1 values will flatten the likelihood, decreasing their influence.
 
     ncpus: int = 1  # Parallelize only over locations.
 
@@ -494,6 +497,14 @@ def process_location(location_id, cfg: ProgramConfig, data: ProgramData):
             cfg=cfg, data=data
         )
 
+    # --- Extra plot: Combined calibration time series (all years)
+    _plot_all_calibrations(
+        cfg=cfg, data=data,
+        location_id=location_id,
+    )
+
+    return
+
 
 def _calculate_projection_priors(
         location_id, proj_year, cfg: ProgramConfig, data: ProgramData
@@ -619,6 +630,10 @@ def _calc_likelihood_of_outbreak_features(
             model=cfg.outbreak_features_fit_model,
         )
 
+        # (Optional) Apply temperature to the likelihood evaluation
+        if cfg.ll_temperature != 1.0:
+            pdf_evals = pdf_evals ** (1.0 / cfg.ll_temperature)
+
         likelihood_sr *= pdf_evals
 
     return likelihood_sr
@@ -687,6 +702,63 @@ def _get_and_make_plots_dir(
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
+
+
+def _plot_all_calibrations(
+        cfg: ProgramConfig, data: ProgramData,
+        location_id,
+):
+    """"""
+    _ptab = " -- "  # Tabulation of print messages
+    plots_out_dir = _get_and_make_plots_dir(
+        main_out_dir=cfg.output_dir,
+        subdir_fmt=cfg.location_year_subdir_fmt,
+        location_id=location_id,
+        proj_year="all-years",
+    )
+    # ==== Plot year-wise. Should define a window.
+
+    with plt.rc_context({
+        "patch.linewidth": 0,
+    }):
+        fig, ax = plt.subplots(figsize=(15, 6))
+
+        # Prediction stats from each year's calibration
+        # --------
+        for year, df in data.case_stats_trajectories_df.groupby("year"):
+            dates = df.index.get_level_values("date")
+            color = "palevioletred"
+
+            if year in cfg.exclude_years_by_location[location_id]:
+                color = "gray"
+
+            pred_ci = ax.fill_between(
+                dates, df["q025"], df["q975"],
+                alpha=0.5, color=color, label="95% CI"
+            )
+            pred_med = ax.plot(
+                dates, df["median"], color=color, label="Median prediction"
+            )[0]
+
+        # --- Observations
+        obs = ax.plot(
+            data.observations_sr, "ko",
+            ms=2, label="Observations"
+        )[0]
+
+        ax.xaxis.set_major_locator(mpl.dates.YearLocator())
+        ax.set_ylabel("Weekly dengue cases")
+
+        ax.legend(handles=[obs, pred_med, pred_ci])
+        fig.suptitle(f"Calibration time series - {location_id}")
+        fig.tight_layout()
+
+        fpath = plots_out_dir / f"all_calibration_trajectories.pdf"
+        fig.savefig(fpath)
+        print(f"{_ptab}Exported calibration trajectory plots: {fpath}")
+        plt.close(fig)
+
+    return
 
 
 def _plot_bayesian_update(
