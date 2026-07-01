@@ -73,7 +73,7 @@ Calibration was achieved through a multistage Bayesian approach, aimed first at 
 #### 5.1 Yearwise 3-stage calibration
 The initial 3-stage calibration runs independently for each location and season, orchestrated by the `src/scripts/calibrate_3rd_imdc.py` file (`calibrate-3rd-imdc` entry point).
 
-Each simulation starts at EW26 of reference year `Y` and runs 68 weekly steps. The calibration scoring window runs from EW41 of year `Y` to EW25 of `Y+1`, ensuring all years use the same range of epidemiologic weeks while respecting data availability.
+Each simulation starts at EW26 of reference year `Y` and runs 69 weekly steps. The calibration scoring window runs from EW41 of year `Y` to EW25 of `Y+1`, ensuring all years use the same range of epidemiologic weeks while respecting data availability.
 
 
 Stage summary:
@@ -94,7 +94,12 @@ Then `calc-outbreak-features-from-posteriors` computes feature stats from stocha
 
 All available calibration years are combined into a single distribution, which is updated to follow predictions of total number of cases, peak size and peak week.
 
-The `src/scripts/process_data_for_projections.py` script merges available calibration years (`year < projection_year`, respecting the data usage restriction), reweights by year so all years are equally likely, then applies outbreak-feature likelihoods. It then samples `N=1000` projection parameter sets (`projection_parameter_samples.csv`) from the updated posterior distributions.
+The `src/scripts/process_data_for_projections.py` script merges available calibration years (`year < projection_year`, 
+respecting the data usage restriction), reweights by year so all years are equally likely, then applies outbreak-feature likelihoods. 
+It then samples `N=5000` projection parameter sets (`projection_parameter_samples.csv`) from the updated posterior distributions.
+
+After visual inspection, 3 location/year pairs were excluded from the calibrated posterior due to poor model fit: AL_2015, PB_2021, SE_2018. 
+Exclusion done by setting `exclude_years_by_location` in `process_data_for_projections_default.yaml`. 
 
 ### 5.3 Forecasting 
 `src/scripts/project_3rd_imdc.py` runs projection trajectories and exports `imdc_submission.csv` per location and projection-year.

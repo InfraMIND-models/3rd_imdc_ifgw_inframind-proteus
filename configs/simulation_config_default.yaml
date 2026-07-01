@@ -1,7 +1,7 @@
 simulation:
   mode: calibration            # "calibration" | "projection"
   num_simulations: 1024 # 1024, 2**18 = 262144, 2**19 = 524288, 2**20 = 1048576
-  num_time_steps: 68           # steps after the warm-up window
+  num_time_steps: 69           # steps after the warm-up window
   gt_max: 35                   # maximum generation time (days)
   rng_seed: 123
 
