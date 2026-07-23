@@ -505,7 +505,7 @@ def make_axes_seq(
 def rotate_ax_labels(ax, angle=60, xy="x", which="major"):
     """
     Rotate tick labels of a matplotlib axis.
-
+    
     Parameters
     ----------
     ax : matplotlib.axes.Axes

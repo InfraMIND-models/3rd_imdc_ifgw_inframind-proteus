@@ -1,6 +1,11 @@
 #!/usr/bin/env python
 """CLI entry point for the inframind-proteus outbreak dynamics simulator.
 
+DEPRECATION WARNING: This script was created as a stub during initial development,
+but it was never used. The dynamic model can be run through `calibrate_3rd_imdc`
+and `project_3rd_imdc` scripts instead.
+This script may be removed in future releases.
+
 Usage
 -----
     uv run python src/scripts/run_outbreak_dynamics.py config.yaml
