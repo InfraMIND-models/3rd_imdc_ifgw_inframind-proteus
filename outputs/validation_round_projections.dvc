@@ -1,0 +1,6 @@
+outs:
+- md5: 7a92aa00549c667a32a9d63961b801cf.dir
+  size: 295743491
+  nfiles: 784
+  hash: md5
+  path: validation_round_projections

@@ -459,6 +459,14 @@ class RenewalSimulator:
                 f"initial_infec_df must have at least {gt_steps} columns; "
                 f"got {initial_infec_df.shape[1]}"
             )
+        if initial_infec_df.shape[1] != cfg.initial_infections.num_steps:
+            raise ValueError(
+                f"initial_infec_df has {initial_infec_df.shape[1]} columns, "
+                f"but config.initial_infections.num_steps is "
+                f"{cfg.initial_infections.num_steps}. Unless you are providing "
+                f"a custom initial_infec_df (remove this error if so), these "
+                f"should match for the model to be consistent."
+            )
 
         # if not params_df.index.isin(initial_infec_df.index).all():  # contains
         if not (initial_infec_df.index == params_df.index).all():  # exact match
@@ -530,7 +538,7 @@ class RenewalSimulator:
         # 5. Core renewal loop
         # ------------------------------------------------------------------
         infec_vec = self._run_renewal_loop(
-            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+            infec_vec, rt_vec, gt_pmf, gt_steps, initial_steps, num_steps
         )
 
         # ------------------------------------------------------------------
@@ -687,6 +695,7 @@ class RenewalSimulator:
         rt_vec: np.ndarray,
         gt_pmf: np.ndarray,
         gt_max_steps: int,
+        num_initial_steps: int,
         num_time_steps: int,
     ) -> np.ndarray:
         """Core renewal equation time loop (numba-compatible structure).
@@ -708,7 +717,10 @@ class RenewalSimulator:
             This ordering aligns directly with the look-back window slices
             so no further reversal is needed inside the loop.
         gt_max_steps:
-            Size of the warm-up / look-back window.
+            Maximum generation time in number of steps.
+        num_initial_steps:
+            Size of the warm-up / look-back window, which are skipped at the
+            simulation loop.
         num_time_steps:
             Number of steps to advance.
 
@@ -736,6 +748,7 @@ class RenewalSimulator:
             rt_vec=rt_vec,
             gt_pmf=gt_pmf,
             gt_max_steps=gt_max_steps,
+            num_initial_steps=num_initial_steps,
             num_time_steps=num_time_steps,
         )
 
@@ -1177,20 +1190,22 @@ def sample_negative_binomial_trajectories(
     return cases_vec
 
 _nb_readonly_arr = nb.types.Array(nb.types.float64, 2, 'A', readonly=True)
-@nb.njit(
-    nb.float64[:,:](
-        nb.float64[:,:],
-        nb.float64[:,:],
-        _nb_readonly_arr,
-        nb.int64,
-        nb.int64,
-    ),
-)
+# @nb.njit(
+#     nb.float64[:,:](
+#         nb.float64[:,:],
+#         nb.float64[:,:],
+#         _nb_readonly_arr,
+#         nb.int64,
+#         nb.int64,
+#         nb.int64,
+#     ),
+# )
 def _run_renewal_loop_numba(
     infec_vec: np.ndarray,
     rt_vec: np.ndarray,
     gt_pmf: np.ndarray,
     gt_max_steps: int,
+    num_initial_steps: int,
     num_time_steps: int,
 ) -> np.ndarray:
     """Core renewal equation time loop (numba-compatible structure).
@@ -1212,7 +1227,10 @@ def _run_renewal_loop_numba(
         This ordering aligns directly with the look-back window slices
         so no further reversal is needed inside the loop.
     gt_max_steps:
-        Size of the warm-up / look-back window.
+        Maximum generation time in number of steps.
+    num_initial_steps:
+        Size of the warm-up / look-back window, which are skipped at the
+        simulation loop.
     num_time_steps:
         Number of steps to advance.
 
@@ -1235,13 +1253,11 @@ def _run_renewal_loop_numba(
     window), and ``w_i`` is the GT PMF row for step ``i``.
     """
     for i_sim_step in range(num_time_steps):
-        i_full = gt_max_steps + i_sim_step
-        # Look-back window: columns [i_sim_step, i_full)
+        i_full = num_initial_steps + i_sim_step
         # Shape of each slice: (num_simulations, gt_max_steps)
-        # gt_pmf[i_sim_step] broadcasts as (gt_max_steps,)
         infec_vec[:, i_full] = np.sum(
-            rt_vec[:, i_sim_step:i_full]
-            * infec_vec[:, i_sim_step:i_full]
+            rt_vec[:, i_full - gt_max_steps : i_full]
+            * infec_vec[:, i_full - gt_max_steps : i_full]
             * gt_pmf[i_sim_step],
             axis=1,
         )
