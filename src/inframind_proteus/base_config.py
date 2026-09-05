@@ -1,4 +1,5 @@
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Any, Union
 
 
@@ -55,6 +56,29 @@ class BaseConfig:
             cfg.preprocess()
         return cfg
 
+    def _full_dict(self):
+        """Return an iterator over the config's items, including class and
+        object attributes.
+        """
+        # Select non-callable and non-private class attributes
+        d = {
+            key: value for key, value in self.__class__.__dict__.items()
+            if not key.startswith("__") and not callable(value)
+        }
+        # Update with instance attributes, which may override class attributes
+        d.update(self.__dict__)
+
+        return d
+
+    def items(self):
+        """Return an iterator over the config's items, including class and
+        object attributes.
+
+        This method calls `self._full_dict()` to get a dictionary of all
+        attributes and then returns its items.
+        """
+        return self._full_dict().items()
+
     def to_dict(self) -> dict[str, Any]:
         """Convert the config object to a dictionary, recursing through
         nested config members.
@@ -67,16 +91,9 @@ class BaseConfig:
         exporting to YAML.
         """
 
-        # Select non-callable and non-private class attributes
-        d = {
-            key: value for key, value in self.__class__.__dict__.items()
-            if not key.startswith("__") and not callable(value)
-        }
-        # Update with instance attributes, which may override class attributes
-        d.update(self.__dict__)
-
         # Recurse into nested BaseConfig objects
-        for field_name, field_value in d.items():
+        d = self._full_dict()
+        for field_name, field_value in self.items():
             if isinstance(field_value, BaseConfig) or hasattr(field_value, "to_dict"):
                 d[field_name] = field_value.to_dict()
 
@@ -92,3 +109,19 @@ class BaseConfig:
         #         result[f.name] = value
         #
         # return result
+
+    # ======
+    def convert_path_fields(self, suffixes: list[str] = None):
+        """Preprocessing helper to convert fields ending with certain
+        suffixes to Path objects.
+
+        Changes made in place.
+        """
+        suffixes = suffixes or ["_fpath", "_dir", "_dirpath"]
+        for name, value in self.items():
+            if not isinstance(name, str):
+                continue
+            for suffix in suffixes:
+                if name.endswith(suffix):
+                    setattr(self, name, Path(value))
+                    break

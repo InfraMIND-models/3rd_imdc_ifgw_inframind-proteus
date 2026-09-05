@@ -20,6 +20,7 @@ import pandas as pd
 import pytest
 from numpy.testing import assert_allclose
 
+from inframind_proteus.outbreak_dynamics import InitialInfectionsConfig
 from inframind_proteus.outbreak_dynamics.generation_time import ConstantGammaGT
 from inframind_proteus.outbreak_dynamics.rt_models import LogisticRT
 from inframind_proteus.outbreak_dynamics.simulator import (
@@ -62,6 +63,7 @@ def make_config(
     calibration_start: str | None = None,
     calibration_end: str | None = None,
     population_size: int = int(1E5),
+    initial_infections_num_steps: int = 7,
 ) -> SimulationConfig:
     # if case_beam_quantiles is None:
     #     case_beam_quantiles = [0.025, 0.5, 0.975]
@@ -92,6 +94,10 @@ def make_config(
         scoring=ScoringConfig(
             metrics=metrics or ScoringConfig().metrics,
             case_beam_quantiles=case_beam_quantiles or ScoringConfig().case_beam_quantiles,
+        ),
+        initial_infections=InitialInfectionsConfig(
+            method="ones",
+            num_steps=initial_infections_num_steps,
         ),
         rng_seed=rng_seed,
     )
@@ -131,6 +137,7 @@ def make_simulator(
     gt_max: int = 7,
     mode: str = "projection",
     rng_seed: int = 42,
+    initial_infections_num_steps: int = 7,
 ) -> RenewalSimulator:
     """Minimal simulator using LogisticRT + ConstantGammaGT."""
     cfg = make_config(
@@ -140,6 +147,7 @@ def make_simulator(
         gt_max=gt_max,
         mode=mode,
         rng_seed=rng_seed,
+        initial_infections_num_steps=initial_infections_num_steps,
     )
     return RenewalSimulator(
         rt_model=LogisticRT(),
@@ -165,7 +173,7 @@ class TestRenewalLoop:
         rt_vec = np.zeros_like(infec_vec)
 
         result = RenewalSimulator._run_renewal_loop(
-            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+            infec_vec, rt_vec, gt_pmf, gt_steps, gt_steps, num_steps
         )
         assert_allclose(result[:, gt_steps:], 0.0)
 
@@ -181,7 +189,7 @@ class TestRenewalLoop:
         gt_pmf = make_delta_gt_pmf(gt_steps, num_steps)
 
         RenewalSimulator._run_renewal_loop(
-            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+            infec_vec, rt_vec, gt_pmf, gt_steps, gt_steps, num_steps
         )
         assert_allclose(infec_vec[:, :gt_steps], warmup_values)
 
@@ -194,7 +202,7 @@ class TestRenewalLoop:
         gt_pmf = make_delta_gt_pmf(gt_steps, num_steps)
 
         returned = RenewalSimulator._run_renewal_loop(
-            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+            infec_vec, rt_vec, gt_pmf, gt_steps, gt_steps, num_steps
         )
         assert returned is infec_vec
 
@@ -214,7 +222,7 @@ class TestRenewalLoop:
         rt_vec = np.ones_like(infec_vec)
 
         result = RenewalSimulator._run_renewal_loop(
-            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+            infec_vec, rt_vec, gt_pmf, gt_steps, gt_steps, num_steps
         )
         assert_allclose(result[:, gt_steps:], c, rtol=1e-12)
 
@@ -234,7 +242,7 @@ class TestRenewalLoop:
         rt_vec = np.full_like(infec_vec, 2.0)
 
         result = RenewalSimulator._run_renewal_loop(
-            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+            infec_vec, rt_vec, gt_pmf, gt_steps, gt_steps, num_steps
         )
         expected = 2.0 ** np.arange(1, num_steps + 1)  # 2, 4, 8, 16, 32
         for row in result:
@@ -255,7 +263,7 @@ class TestRenewalLoop:
         rt_vec = np.ones_like(infec_vec)
 
         result = RenewalSimulator._run_renewal_loop(
-            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+            infec_vec, rt_vec, gt_pmf, gt_steps, gt_steps, num_steps
         )
         # With uniform GT and R=1, infec at each step = mean of last gt_steps = 1
         assert_allclose(result[:, gt_steps:], 1.0, rtol=1e-12)
@@ -275,7 +283,7 @@ class TestRenewalLoop:
         rt_vec[1, :] = 0.5   # sim 1: R=0.5 → exponential decay
 
         result = RenewalSimulator._run_renewal_loop(
-            infec_vec, rt_vec, gt_pmf, gt_steps, num_steps
+            infec_vec, rt_vec, gt_pmf, gt_steps, gt_steps, num_steps
         )
         # Sim 0 values should be strictly larger than sim 1 at every step
         assert np.all(result[0, gt_steps:] > result[1, gt_steps:])
@@ -472,9 +480,9 @@ class TestRun:
 
     @pytest.fixture
     def initial_infec(self, sim):
-        gt_steps = sim._gt_max_steps  # = 1
+        num_initial_steps = sim.config.initial_infections.num_steps
         return pd.DataFrame(
-            np.ones((sim.config.num_simulations, gt_steps))
+            np.ones((sim.config.num_simulations, num_initial_steps))
         )
 
     @pytest.fixture
@@ -556,8 +564,8 @@ class TestRun:
             config=cfg,
         )
         params = make_params_df(sim_cal.config.num_simulations)
-        gt_steps = sim_cal._gt_max_steps
-        initial = pd.DataFrame(np.ones((sim_cal.config.num_simulations, gt_steps)))
+        num_initial_steps = cfg.initial_infections.num_steps
+        initial = pd.DataFrame(np.ones((sim_cal.config.num_simulations, num_initial_steps)))
         timestamps = pd.date_range(
             start=cfg.temporal.sim_start,
             periods=cfg.num_time_steps,
@@ -583,8 +591,8 @@ class TestRun:
             config=cfg,
         )
         params = make_params_df(sim_cal.config.num_simulations)
-        gt_steps = sim_cal._gt_max_steps
-        initial = pd.DataFrame(np.ones((num_sim, gt_steps)))
+        num_initial_steps = cfg.initial_infections.num_steps
+        initial = pd.DataFrame(np.ones((num_sim, num_initial_steps)))
         # Observations covering all 6 simulation steps (wider than calibration window)
         all_timestamps = pd.date_range(
             start=cfg.temporal.sim_start,
@@ -624,7 +632,7 @@ class TestRun:
             config=cfg,
         )
         params = make_params_df(sim_cal.config.num_simulations)
-        initial = pd.DataFrame(np.ones((sim_cal.config.num_simulations, sim_cal._gt_max_steps)))
+        initial = pd.DataFrame(np.ones((sim_cal.config.num_simulations, cfg.initial_infections.num_steps)))
         with pytest.raises(ValueError, match="observations_sr"):
             sim_cal.run(params, initial)
 
@@ -637,7 +645,7 @@ class TestRun:
             config=cfg,
         )
         params = make_params_df(cfg.num_simulations)
-        initial = pd.DataFrame(np.ones((cfg.num_simulations, sim_cal._gt_max_steps)))
+        initial = pd.DataFrame(np.ones((cfg.num_simulations, cfg.initial_infections.num_steps)))
         timestamps = pd.date_range(
             start=cfg.temporal.sim_start,
             periods=cfg.num_time_steps,
@@ -661,7 +669,7 @@ class TestRun:
             config=cfg,
         )
         params = make_params_df(cfg.num_simulations)
-        initial = pd.DataFrame(np.ones((cfg.num_simulations, sim_cal._gt_max_steps)))
+        initial = pd.DataFrame(np.ones((cfg.num_simulations, cfg.initial_infections.num_steps)))
         timestamps = pd.date_range(
             start=cfg.temporal.sim_start,
             periods=cfg.num_time_steps,
@@ -685,7 +693,7 @@ class TestRun:
             config=cfg,
         )
         params = make_params_df(cfg.num_simulations)
-        initial = pd.DataFrame(np.ones((cfg.num_simulations, sim_cal._gt_max_steps)))
+        initial = pd.DataFrame(np.ones((cfg.num_simulations, cfg.initial_infections.num_steps)))
         # Observations shifted by 1 day — not aligned with weekly simulation steps
         sim_timestamps = pd.date_range(
             start=cfg.temporal.sim_start,

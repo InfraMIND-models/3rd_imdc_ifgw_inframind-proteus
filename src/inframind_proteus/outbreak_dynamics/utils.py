@@ -8,6 +8,7 @@ Includes:
 from __future__ import annotations
 
 import io
+from argparse import ArgumentParser
 from collections import OrderedDict, defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -136,6 +137,10 @@ def make_yaml_exportable_dict(
 
     d = deepcopy(data) if copy else data
 
+    # Convert top-level defaultdict/OrderedDict to regular dict
+    if isinstance(d, (OrderedDict, defaultdict)):
+        d = dict(d)
+
     for key, val in d.items():
 
         # Ordered and default dict
@@ -163,6 +168,24 @@ def make_yaml_exportable_dict(
             )
 
     return d
+
+
+def add_set_argument(parser: ArgumentParser):
+    """Append a `--set` argument to an ArgumentParser for nested
+    configuration overrides.
+
+    Modifies the provided `parser` in place to include a `--set` argument.
+    """
+    parser.add_argument(
+        "--set",
+        nargs=2,
+        action="append",
+        default=list(),
+        metavar=("KEY", "VALUE"),
+        help="Set a configuration parameter using dot notation (e.g. "
+             "--set stage1.num_simulations 4096)."
+             " Can be used multiple times.",
+    )
 
 
 def parse_set_arguments_with_yaml(set_args: list[list[str]]):
@@ -482,7 +505,7 @@ def make_axes_seq(
 def rotate_ax_labels(ax, angle=60, xy="x", which="major"):
     """
     Rotate tick labels of a matplotlib axis.
-
+    
     Parameters
     ----------
     ax : matplotlib.axes.Axes

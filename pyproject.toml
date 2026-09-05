@@ -1,10 +1,10 @@
 [project]
 name = "inframind-proteus"
 description = "Dynamic and statistical model for the 3rd Infodengue-Mosqlimate Dengue Challenge (IMDC)."
-authors = [
-  {name = "Paulo C. Ventura", email = "paulo.pc.vs@gmail.com"},
-    # TODO: Add others
-]
+#authors = [
+#  {name = "Paulo C. Ventura", email = "paulo.pc.vs@gmail.com"},
+#    # TODO: Add others
+#]
 version = "0.1.0"
 requires-python = ">=3.12"
 readme = "README.md"
@@ -38,7 +38,9 @@ dev = [
 [project.scripts]
 calibrate-3rd-imdc = "scripts.calibrate_3rd_imdc.main:main"
 calc-outbreak-features-from-posteriors = "scripts.calc_outbreak_features_from_posteriors:main"
+process-data-for-projections = "scripts.process_data_for_projections:main"
 run-outbreak-features = "scripts.run_outbreak_features:main"
+project-3rd-imdc = "scripts.project_3rd_imdc:main"
 
 
 # Pull the CPU-only PyTorch wheel (no CUDA) for the outbreak-features models.
@@ -62,6 +64,7 @@ dev = [
     "pytest>=9.0.3",
     "nbdime>=4.0.1",
     "salib>=1.5.2",
+    "pypdf>=6.4.2",
 ]
 
 
