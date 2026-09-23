@@ -1,0 +1,35 @@
+# Sensitivity run: disable the outbreak-feature Bayesian update entirely
+# (`outbreak_feature_names: []`), reproducing the validation round otherwise
+# identically, to compare WIS with vs. without the update.
+#
+# All other fields below only exist to match the *validation round* config
+# (outputs/validation_round_projections/projections/*/process_data_for_projections_config.yaml),
+# since this file does not inherit from configs/process_data_for_projections_default.yaml
+# (which has since moved on to forecast-round settings).
+
+calibrations_main_dir: "outputs/validation_round_calibration"
+outbreak_features_predictions_dir: "predictions"
+output_dir: "outputs/sensitivity/no_update_from_outbreak_features"
+
+use_location_ids: []  # Run all (override with -l/--use-location-ids for a quick subset check)
+use_projection_years: [2022, 2023, 2024, 2025]  # Validation round projection years
+use_calibration_years: [
+  2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021,
+  2022, 2023, 2024,
+]  # No 2025: not present under outputs/validation_round_calibration
+
+num_projection_samples: 5000
+projection_sampling_seed: 5
+ncpus: 8
+
+# --- Key change: no outbreak-feature likelihood update (uniform likelihood)
+outbreak_feature_names: []
+
+# Same exclusions used for the official validation round submission.
+# (No PR/RS/SC pre-2019 exclusion here: that was a forecast-round-only addition.)
+exclude_years_by_location:
+  AC: []
+  AL: [2015]
+  ES: [2021]
+  PI: [2021]
+  SE: [2018]
