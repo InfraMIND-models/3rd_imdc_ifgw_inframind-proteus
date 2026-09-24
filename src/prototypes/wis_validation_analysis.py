@@ -31,6 +31,8 @@ import matplotlib.dates
 import matplotlib.lines
 import matplotlib.patches
 import matplotlib.pyplot as plt
+import matplotlib.ticker
+from scipy.stats import gaussian_kde
 from matplotlib.backends.backend_pdf import PdfPages
 
 from inframind_proteus.base_config import BaseConfig
@@ -47,6 +49,7 @@ PLOT_COLORS = dict(
     median="#49786cff",
     pi95="#b6c6a0ff",
     pi50="#68aa80ff",
+    bkg="#f3f4f6",
 )
 
 
@@ -71,6 +74,7 @@ def main():
 
     plot_wis_comparison(scores_df, cfg.output_dir / "wis_comparison.pdf")
     print(f"Exported WIS comparison plots: {cfg.output_dir / 'wis_comparison.pdf'}")
+
 
     # --- Predictive time series by location (one PDF per scenario, one page per location)
     scenario_dirs = {"with_update": cfg.with_update_dir, "no_update": cfg.no_update_dir}
@@ -127,6 +131,8 @@ class ProgramConfig(BaseConfig):
     # outbreak-feature plots; actual scoring uses the submission file's own dates).
     imdc_projection_epiweek_start: int = 41
     imdc_projection_epiweek_end: int = 40
+
+    plot_full_obs_history: bool = False
 
     output_dir: Path = Path(".local/prototype_wis_analysis")
 
@@ -313,15 +319,18 @@ def plot_predictive_timeseries_by_location(
         "lines.linewidth": 1.5,
         "lines.markersize": 3,
         "lines.markeredgewidth": 0,
+        "figure.facecolor": PLOT_COLORS["bkg"],
+        "axes.facecolor": PLOT_COLORS["bkg"],
         # "pdf.fonttype": 42,  # Troublesome on Ubuntu
     }):
-        for location_id in location_ids:
+        for i_location, location_id in enumerate(location_ids):
             loc_df = predictions_long_df.loc[location_id]
             obs_sr = obs_cache.get_location(location_id)
 
-            fig, ax = plt.subplots(figsize=(12, 4.5))
+            fig, ax = plt.subplots(figsize=(5., 4.))
 
-            for year in sorted(loc_df.index.get_level_values("year").unique()):
+            years = list(sorted(loc_df.index.get_level_values("year").unique()))
+            for i_year, year in enumerate(years):
                 year_df = loc_df.loc[year]
 
                 ax.plot(year_df.index, year_df["pred"], color=PLOT_COLORS["median"])
@@ -340,23 +349,32 @@ def plot_predictive_timeseries_by_location(
                 # no-update scenario) would push the label off unpredictably.
                 if (location_id, year) in scenario_scores.index:
                     row = scenario_scores.loc[(location_id, year)]
-                    label = f"WIS={row['wis_mean']:0.0f}"
+                    label = f"{row['wis_mean']:0.1f}"
+                    label = f"WIS={label}" if i_year==0 else label
                     if row["frac_scored"] < 1:
                         label += "\n(partial)"
                     x_mid = year_df.index[0] + (year_df.index[-1] - year_df.index[0]) / 2
                     ax.annotate(
                         label, xy=(x_mid, 0.98), xycoords=("data", "axes fraction"),
-                        ha="center", va="top", fontsize=7,
-                        bbox=dict(boxstyle="round", facecolor="white", edgecolor="none", alpha=0.75),
+                        ha="center", va="top", fontsize=8,
+                        bbox=dict(edgecolor="none", alpha=0.00),
+                        # arrowprops=dict(arrowstyle="-", color="gray", alpha=0.5)
                     )
 
             # --- Observations (full history)
-            ax.plot(obs_sr, "s", color=PLOT_COLORS["obs"], label="Observed")
+            if cfg.plot_full_obs_history:
+                _obs = obs_sr
+            else:
+                _obs = obs_sr.loc[f"{years[0]}-01-01":]
+            ax.plot(_obs, "s", color=PLOT_COLORS["obs"], label="Observed")
 
             ax.set_ylabel("Weekly Dengue Cases")
             ax.set_xlim(
-                obs_sr.index.min(),
+                _obs.index.min(),
                 loc_df.index.get_level_values("date").max() + pd.Timedelta(weeks=4),
+            )
+            ax.set_ylim(
+                0, 1.05 * obs_sr.max()  # Full history maximum
             )
             ax.xaxis.set_major_locator(mpl.dates.YearLocator(base=1))
             ax.xaxis.set_minor_locator(mpl.dates.MonthLocator())
@@ -370,7 +388,13 @@ def plot_predictive_timeseries_by_location(
                 mpl.patches.Patch(color=PLOT_COLORS["pi95"], label="95% Prediction Interval"),
                 mpl.lines.Line2D([0], [0], color=PLOT_COLORS["obs"], lw=0, marker="s", label="Observed Cases"),
             ]
-            ax.legend(handles=handles, loc="upper left", fontsize=9)
+
+            if i_location == 0:
+                # Legend on its own figure, saved as the first page of the PDF
+                legend_fig = plt.figure(figsize=(3., 1.6))
+                legend_fig.legend(handles=handles, loc="center", fontsize=9, frameon=False)
+                pdf.savefig(legend_fig)
+                plt.close(legend_fig)
 
             fig.tight_layout()
             pdf.savefig(fig)
@@ -529,36 +553,54 @@ def plot_outbreak_feature_distributions(
     obs_cache = DiseaseTimeSeriesCache(cfg.disease_cases_dir)
 
     feature_labels = {
-        "case_attack_rate": "Case attack rate (total cases)",
+        "case_attack_rate": "Total cases",
         "peak_week": "Peak week (weeks from EW41)",
-        "peak_amplitude": "Peak weekly incidence",
+        "peak_amplitude": "Peak amplitude (cases)",
     }
 
-    with PdfPages(out_pdf_path) as pdf:
-        for location_id, year in location_year_ids:
+    with PdfPages(out_pdf_path) as pdf, plt.rc_context({
+        "figure.facecolor": PLOT_COLORS["bkg"],
+        "axes.facecolor": PLOT_COLORS["bkg"],
+    }):
+        for i_location, (location_id, year) in enumerate(location_year_ids):
+            if i_location % 10 == 0:
+                print(f"   Plotting location: {location_id}")
             obs_sr = obs_cache.get_location(location_id)
             observed_feats, is_partial = get_observed_feature_values(cfg, location_id, year, obs_sr)
 
             fig, axes = plt.subplots(
                 1, len(cfg.outbreak_feature_names),
-                figsize=(4 * len(cfg.outbreak_feature_names), 3.5),
+                figsize=(3.2 * len(cfg.outbreak_feature_names), 3.),
             )
-            for ax, feature_name in zip(axes, cfg.outbreak_feature_names):
+            for i_ax, (ax, feature_name) in enumerate(zip(axes, cfg.outbreak_feature_names)):
                 samples = get_predicted_feature_samples(cfg, feat_cache, feature_name, location_id, year)
                 if samples.shape[0] == 0:
                     ax.set_title(f"{feature_name}\n(no prediction)")
                     continue
 
-                ax.hist(samples, bins=30, density=True, color="#5b8dd6", alpha=0.75)
+                # ax.hist(samples, bins=30, density=True, color=PLOT_COLORS["pi50"], alpha=1.0)
+
+                # KDE of the same samples; skipped if degenerate (too few / constant samples)
+                if samples.shape[0] > 1 and np.ptp(samples) > 0:
+                    kde = gaussian_kde(samples)
+                    grid = np.linspace(samples.min(), samples.max(), 200)
+                    _y = kde(grid)
+                    ax.plot(grid, _y, color=PLOT_COLORS["pi50"], linewidth=2, label="Predicted distribution")
+                    ax.fill_between(grid, _y, color=PLOT_COLORS["pi50"], alpha=0.5)
 
                 if observed_feats is not None and feature_name in observed_feats.index:
                     val = observed_feats[feature_name]
                     label = "Observed" + (" (partial season)" if is_partial else "")
-                    ax.axvline(val, color="#d64550", linestyle="--", linewidth=1.5, label=label)
-                    ax.legend(fontsize=8)
+                    ax.axvline(val, color="#262626", linestyle="--", linewidth=1.5, label=label)
+                    if i_ax == 0:
+                        ax.legend(fontsize=8)
 
                 ax.set_xlabel(feature_labels.get(feature_name, feature_name))
                 ax.set_ylabel("Density")
+
+                # Feature-specific setting
+                if feature_name == "case_attack_rate":
+                    ax.xaxis.set_major_formatter(mpl.ticker.FuncFormatter(lambda x, _: f"{int(x / 1000):0d}k"))
 
             fig.suptitle(f"{location_id} — season {year}")
             fig.tight_layout()
