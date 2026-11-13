@@ -147,3 +147,13 @@ Full dependency list in `pyproject.toml`.
 
 The InfraMIND-Proteus model has no associated publications yet.
 
+---
+
+# Funding
+
+Paulo C. Ventura acknowledges funding through the following statements:
+
+- This study was financed, in part, by the São Paulo Research Foundation (FAPESP), Brasil. Process Number #2025/12049-1 
+- This study was financed, in part, by the São Paulo Research Foundation (FAPESP), Brasil. Process Number #2026/08023-0
+- Disclaimer (in Portuguese): "As opiniões, hipóteses e conclusões ou recomendações expressas neste material são de responsabilidade do(s) autor(es) e não necessariamente refletem a visão da FAPESP.”
+
