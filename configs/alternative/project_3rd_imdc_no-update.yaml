@@ -1,0 +1,9 @@
+# Companion to configs/alternative/process_data_for_projections_no-update.yaml:
+# runs final projections from the "no outbreak-feature update" parameter
+# samples. All other fields already match the validation round via class
+# defaults (see outputs/validation_round_projections/projections/*/projections_program_config.yaml).
+
+output_dir: "outputs/sensitivity/no_update_from_outbreak_features"
+use_location_ids: []  # Run all (override with -l/--use-location-ids for a quick subset check)
+use_projection_years: [2022, 2023, 2024, 2025]  # Validation round projection years
+ncpus: 8
